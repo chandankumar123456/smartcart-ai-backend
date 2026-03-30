@@ -17,7 +17,7 @@ class QueryIntent(str, Enum):
     cart_optimization = "cart_optimization"
     exploratory = "exploratory"
     unsupported = "unsupported"
-    # Backward-compatible aliases used in older pipeline/tests.
+    # Backward-compatible aliases used in older pipeline/tests (remove in v2.0).
     deal_search = "deal_search"
     cart_optimize = "cart_optimize"
 

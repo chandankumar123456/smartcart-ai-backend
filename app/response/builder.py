@@ -29,7 +29,7 @@ class ResponseBuilder:
                 "intent": sq.intent.value if sq else "unsupported",
                 "total_results": 0,
                 "total_deals": 0,
-                "notes": (sq.metadata.notes if sq else "unsupported query"),
+                "notes": (sq.metadata.notes if sq else "No query structure available"),
                 "confidence": (sq.metadata.confidence if sq else 1.0),
                 "normalized_query": (sq.normalized_query if sq else raw_query),
                 "items": [item.model_dump() for item in (sq.items if sq else [])],

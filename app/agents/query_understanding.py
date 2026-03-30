@@ -110,7 +110,8 @@ _NON_GROCERY_KEYWORDS = {
     "stocks", "crypto", "insurance", "car", "bike", "shoes", "shirt",
 }
 _NOISE_TOKENS = {"pls", "plz", "please", "hey", "hi", "hello", "bhai", "yaar"}
-_TOKEN_CLEAN = re.compile(r"[^a-z0-9₹\s\.]")
+_TOKEN_CLEAN = re.compile(r"[^\w₹\s\.]", re.UNICODE)
+_STOPWORDS = {"find", "show", "get", "buy", "need", "want", "for", "me", "the", "a", "an", "under", "above"}
 
 _KNOWN_PRODUCTS = {
     "milk", "bread", "eggs", "rice", "tomato", "onion", "oil", "butter",
@@ -131,23 +132,35 @@ _NORMALIZATION_MAP = {
     "dal": "lentils",
     "ginger piece": "ginger",
 }
+# Used for product phrase detection after text normalization.
+_MULTI_WORD_NORMALIZATION_PHRASES = sorted(
+    [v for v in _NORMALIZATION_MAP.values() if " " in v],
+    key=len,
+    reverse=True,
+)
+_HIGH_CONFIDENCE_UNSUPPORTED = 0.95
+_DEFAULT_PARSE_CONFIDENCE = 0.72
+_GROCERY_CONTEXT_KEYWORDS = _KNOWN_PRODUCTS.union(
+    {"grocery", "groceries", "food", "ingredient", "ingredients"}
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _normalize_text(query: str) -> str:
-    text = unicodedata.normalize("NFKD", query).encode("ascii", "ignore").decode("ascii")
+    text = unicodedata.normalize("NFKC", query)
     text = text.lower().strip()
     text = _TOKEN_CLEAN.sub(" ", text)
     tokens = [t for t in text.split() if t and t not in _NOISE_TOKENS]
     text = " ".join(tokens)
     for source, target in sorted(_NORMALIZATION_MAP.items(), key=lambda x: len(x[0]), reverse=True):
-        text = text.replace(source, target)
+        text = re.sub(rf"(?<!\w){re.escape(source)}(?!\w)", target, text, flags=re.UNICODE)
     return " ".join(text.split())
 
 
 def _extract_preferences(q: str) -> List[str]:
-    return list(dict.fromkeys(v for k, v in _PREFERENCE_KEYWORDS.items() if k in q))
+    words = set(q.split())
+    return list(dict.fromkeys(v for k, v in _PREFERENCE_KEYWORDS.items() if k in words))
 
 
 def _extract_product_and_items(q: str, intent: QueryIntent, preferences: List[str]) -> Tuple[str, List[Dict[str, Any]]]:
@@ -162,22 +175,18 @@ def _extract_product_and_items(q: str, intent: QueryIntent, preferences: List[st
 
     tokens = [t.strip(".,!?") for t in q.split()]
     product = ""
-    for word in tokens:
-        if word in _KNOWN_PRODUCTS:
-            product = word
+    for phrase in _MULTI_WORD_NORMALIZATION_PHRASES:
+        if phrase in q:
+            product = phrase
             break
     if not product:
-        for phrase in sorted(_NORMALIZATION_MAP.values(), key=len, reverse=True):
-            if " " in phrase and phrase in q:
-                product = phrase
+        for word in tokens:
+            if word in _KNOWN_PRODUCTS:
+                product = word
                 break
     if not product:
-        stopwords = {"find", "show", "get", "buy", "need", "want", "for", "me", "the", "a", "an", "under", "above"}
-        candidates = [t for t in tokens if t not in stopwords and not t.isdigit()]
+        candidates = [t for t in tokens if t not in _STOPWORDS and not t.isdigit()]
         product = candidates[0] if candidates else q
-    if product == "milk":
-        product = "packaged milk"
-
     category = None
     if any(k in product for k in ("milk", "curd", "paneer", "ghee")):
         category = "dairy"
@@ -204,7 +213,9 @@ def _rule_based_parse(query: str) -> Dict[str, Any]:
 
     # Detect intent
     q_words = set(q.split())
-    if q_words.intersection(_NON_GROCERY_KEYWORDS):
+    has_non_grocery_signal = bool(q_words.intersection(_NON_GROCERY_KEYWORDS))
+    has_grocery_signal = bool(q_words.intersection(_GROCERY_CONTEXT_KEYWORDS))
+    if has_non_grocery_signal and not has_grocery_signal:
         intent = QueryIntent.unsupported
     elif any(k in q for k in _RECIPE_KEYWORDS):
         intent = QueryIntent.recipe
@@ -229,7 +240,11 @@ def _rule_based_parse(query: str) -> Dict[str, Any]:
     servings = int(servings_match.group(1)) if servings_match else None
 
     if items and quantity is not None:
-        items[0]["attributes"]["quantity"] = float(quantity)
+        try:
+            parsed_quantity = float(quantity)
+        except ValueError:
+            parsed_quantity = None
+        items[0]["attributes"]["quantity"] = parsed_quantity
         items[0]["attributes"]["unit"] = unit
 
     return {
@@ -242,7 +257,11 @@ def _rule_based_parse(query: str) -> Dict[str, Any]:
             "preferences": preferences,
         },
         "metadata": {
-            "confidence": 0.72 if intent != QueryIntent.unsupported else 0.95,
+            "confidence": (
+                _DEFAULT_PARSE_CONFIDENCE
+                if intent != QueryIntent.unsupported
+                else _HIGH_CONFIDENCE_UNSUPPORTED
+            ),
             "notes": "rule-based fallback parse",
         },
         "filters": {

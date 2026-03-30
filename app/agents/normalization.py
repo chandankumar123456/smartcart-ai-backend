@@ -38,8 +38,8 @@ Rules:
 
 _SAFE_FALLBACKS: Dict[str, Dict[str, Any]] = {
     "milk": {
-        "canonical_name": "milk",
-        "possible_variants": ["packaged milk", "toned milk", "full cream milk"],
+        "canonical_name": "packaged milk",
+        "possible_variants": ["milk", "packaged milk", "toned milk", "full cream milk"],
         "category": "dairy",
         "attributes": [],
     },
