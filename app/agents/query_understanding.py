@@ -10,6 +10,7 @@ It ALWAYS returns a StructuredQuery (never raw text).
 If the LLM is unavailable, a rule-based fallback ensures the pipeline continues.
 """
 
+import logging
 import re
 from typing import Any, Dict
 
@@ -59,8 +60,10 @@ _CART_KEYWORDS = {"optimize", "cart", "basket", "total cost", "split"}
 _KNOWN_PRODUCTS = {
     "milk", "bread", "eggs", "rice", "tomato", "onion", "oil", "butter",
     "pasta", "sugar", "atta", "flour", "salt", "tea", "coffee", "biscuits",
-    "chips", "noodles", "cheese", "yogurt", "curd",
+    "chips", "noodles", "cheese", "yogurt", "curd", "chicken", "ghee",
 }
+
+logger = logging.getLogger(__name__)
 
 
 def _rule_based_parse(query: str) -> Dict[str, Any]:
@@ -120,12 +123,18 @@ class QueryUnderstandingAgent:
             raise AgentException("QueryUnderstandingAgent", "Empty query received")
 
         prompt = _PROMPT_TEMPLATE.format(query=raw_query.strip())
+        llm_called = False
 
         try:
+            llm_called = True
             parsed = await self._llm.call(prompt, schema_example=_SCHEMA_EXAMPLE)
+            logger.debug("[QUERY_AGENT] llm_called=%s raw_output=%s", llm_called, parsed)
             parsed = self._validate_parsed(parsed, raw_query)
+            logger.debug("[PARSE_CHECK] success=true reason=")
         except Exception:
+            logger.debug("[PARSE_CHECK] success=false reason=llm_or_validation_failed")
             parsed = _rule_based_parse(raw_query)
+        logger.debug("[QUERY_AGENT] parsed_query=%s llm_called=%s", parsed, llm_called)
 
         return StructuredQuery(
             product=parsed.get("product", raw_query),

@@ -14,9 +14,11 @@ LangGraph is not installed.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from app.agents.deal_detection import DealDetectionAgent
+from app.agents.normalization import NormalizationAgent
 from app.agents.product_matching import ProductMatchingAgent
 from app.agents.query_understanding import QueryUnderstandingAgent
 from app.agents.ranking import RankingAgent
@@ -34,6 +36,8 @@ from app.data.models import (
 from app.llm.manager import LLMManager, get_llm_manager
 from app.response.builder import ResponseBuilder
 
+logger = logging.getLogger(__name__)
+
 
 class AgentPipeline:
     """Sequential multi-agent pipeline (LangGraph-compatible design).
@@ -47,6 +51,7 @@ class AgentPipeline:
         llm = llm_manager or get_llm_manager()
         self._query_agent = QueryUnderstandingAgent(llm)
         self._product_agent = ProductMatchingAgent()
+        self._normalization_agent = NormalizationAgent(llm)
         self._ranking_agent = RankingAgent()
         self._deal_agent = DealDetectionAgent()
         self._recipe_agent = RecipeAgent(llm)
@@ -58,10 +63,12 @@ class AgentPipeline:
 
     async def run_search(self, query: str) -> FinalResponse:
         """Execute the full search pipeline for a user query."""
+        logger.debug("[ENTRY] endpoint=/ai/search query=%s type=search", query)
         state: Dict[str, Any] = {"raw_query": query}
 
         # Step 1: Understand query
         state["structured_query"] = await self._query_agent.run(query)
+        state["normalized_item"] = await self._normalization_agent.run(query)
 
         # Step 2: If recipe intent, delegate to recipe pipeline
         sq: StructuredQuery = state["structured_query"]
@@ -69,30 +76,55 @@ class AgentPipeline:
             return await self.run_recipe(query)
 
         # Step 3: Match products
-        state["unified_product"] = await self._product_agent.run(sq)
+        state["unified_product"] = await self._product_agent.run(sq, state["normalized_item"])
 
         # Step 4: Rank
         state["ranking_result"] = await self._ranking_agent.run(state["unified_product"])
+        logger.debug(
+            "[RANKING] items_processed=%s",
+            len(state["ranking_result"].ranked_list),
+        )
 
         # Step 5: Detect deals
         state["deal_result"] = await self._deal_agent.run(state["unified_product"])
+        logger.debug("[DEALS] deals_count=%s", len(state["deal_result"].deals))
 
-        return self._builder.build_search_response(state)
+        response = self._builder.build_search_response(state)
+        logger.debug(
+            "[FINAL_OUTPUT] result_count=%s total_price=%s deals=%s",
+            len(response.results),
+            response.total_price,
+            len(response.deals),
+        )
+        return response
 
     async def run_recipe(self, query: str, servings: int = 2) -> FinalResponse:
         """Execute the recipe pipeline."""
+        logger.debug("[ENTRY] endpoint=/ai/recipe query=%s type=recipe", query)
         state: Dict[str, Any] = {"raw_query": query}
         state["recipe_result"] = await self._recipe_agent.run(query, servings)
-        return self._builder.build_recipe_response(state)
+        response = self._builder.build_recipe_response(state)
+        logger.debug(
+            "[FINAL_OUTPUT] result_count=%s total_price=%s deals=%s",
+            len(response.results),
+            response.total_price,
+            len(response.deals),
+        )
+        return response
 
     async def run_cart_optimize(self, items: List[CartItem]) -> FinalResponse:
         """Find the optimal platform split for a list of cart items."""
+        logger.debug(
+            "[ENTRY] endpoint=/ai/cart-optimize query=%s type=cart_optimize",
+            ",".join(item.name for item in items),
+        )
         state: Dict[str, Any] = {"cart_items": items}
 
         # For each item, find cheapest option across platforms
         item_cheapest: Dict[str, Any] = {}
         for item in items:
-            products = get_products_for_entity(item.name)
+            normalized_item = await self._normalization_agent.run(item.name)
+            products = get_products_for_entity(normalized_item.canonical_name)
             if not products:
                 continue
             cheapest = min(
@@ -119,7 +151,8 @@ class AgentPipeline:
         # Compare with single-platform cost
         single_platform_costs: Dict[str, float] = {}
         for item in items:
-            products = get_products_for_entity(item.name)
+            normalized_item = await self._normalization_agent.run(item.name)
+            products = get_products_for_entity(normalized_item.canonical_name)
             for p in products:
                 plat = p.platform.value
                 single_platform_costs[plat] = single_platform_costs.get(plat, 0) + p.price
@@ -133,7 +166,14 @@ class AgentPipeline:
             savings=savings,
         )
         state["cart_result"] = result
-        return self._builder.build_cart_response(state)
+        response = self._builder.build_cart_response(state)
+        logger.debug(
+            "[FINAL_OUTPUT] result_count=%s total_price=%s deals=%s",
+            len(response.results),
+            response.total_price,
+            len(response.deals),
+        )
+        return response
 
 
 # Module-level singleton

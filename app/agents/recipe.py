@@ -12,6 +12,7 @@ Output: RecipeResult with ingredients + mapped products + optimised cart
 
 from typing import Any, Dict, List, Optional
 
+from app.agents.normalization import NormalizationAgent
 from app.core.exceptions import AgentException
 from app.data.layer import get_products_for_entity
 from app.data.models import Ingredient, IngredientProduct, PlatformProduct, RecipeResult
@@ -110,6 +111,7 @@ class RecipeAgent:
 
     def __init__(self, llm_manager: LLMManager) -> None:
         self._llm = llm_manager
+        self._normalizer = NormalizationAgent(llm_manager)
 
     async def run(self, query: str, servings: int = 2) -> RecipeResult:
         if not query or not query.strip():
@@ -159,7 +161,8 @@ class RecipeAgent:
                 quantity=str(raw.get("quantity", "1")),
                 unit=raw.get("unit", "pcs"),
             )
-            products = get_products_for_entity(ingredient.name)
+            normalized = await self._normalizer.run(ingredient.name)
+            products = get_products_for_entity(normalized.canonical_name)
             cheapest = _cheapest_product(products)
             result.append(
                 IngredientProduct(

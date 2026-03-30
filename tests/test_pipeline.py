@@ -52,6 +52,47 @@ class TestSearchPipeline:
         deal_platforms = {d["platform"] for d in result.deals}
         assert len(result.deals) >= 0  # may vary based on thresholds
 
+    @pytest.mark.asyncio
+    async def test_search_generic_chicken_returns_results(self, pipeline):
+        result = await pipeline.run_search("chicken")
+        assert len(result.results) > 0
+        assert result.total_price > 0
+
+    @pytest.mark.asyncio
+    async def test_search_generic_curd_alias_returns_results(self, pipeline):
+        result = await pipeline.run_search("dahi")
+        assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_capsicum_returns_results(self, pipeline):
+        result = await pipeline.run_search("capsicum")
+        assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_atta_returns_results(self, pipeline):
+        result = await pipeline.run_search("atta")
+        assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_paneer_cubes_returns_results(self, pipeline):
+        result = await pipeline.run_search("paneer cubes")
+        assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_salad_leaves_returns_results(self, pipeline):
+        result = await pipeline.run_search("salad leaves")
+        assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_evening_snacks_returns_results(self, pipeline):
+        result = await pipeline.run_search("something for evening snacks")
+        assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_vague_multi_item_query_returns_results(self, pipeline):
+        result = await pipeline.run_search("need paneer cubes and salad leaves for dinner")
+        assert len(result.results) > 0
+
 
 class TestRecipePipeline:
     @pytest.mark.asyncio
