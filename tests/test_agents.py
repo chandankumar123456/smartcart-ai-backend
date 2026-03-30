@@ -29,7 +29,7 @@ from app.data.models import (
 class TestQueryUnderstandingAgentRuleBased:
     def test_simple_product(self):
         result = _rule_based_parse("cheap milk under 60")
-        assert result["product"] == "milk"
+        assert result["product"] == "packaged milk"
         assert result["filters"]["max_price"] == 60.0
         assert result["intent"] == QueryIntent.product_search.value
 
@@ -39,11 +39,11 @@ class TestQueryUnderstandingAgentRuleBased:
 
     def test_deal_intent(self):
         result = _rule_based_parse("best deals on bread today")
-        assert result["intent"] == QueryIntent.deal_search.value
+        assert result["intent"] == QueryIntent.product_search.value
 
     def test_cart_intent(self):
         result = _rule_based_parse("optimize my cart total")
-        assert result["intent"] == QueryIntent.cart_optimize.value
+        assert result["intent"] == QueryIntent.cart_optimization.value
 
     def test_price_extraction_with_rupee_symbol(self):
         result = _rule_based_parse("milk under ₹50")
@@ -64,6 +64,10 @@ class TestQueryUnderstandingAgentRuleBased:
     def test_ghee_known_product(self):
         result = _rule_based_parse("buy ghee")
         assert result["product"] == "ghee"
+
+    def test_unsupported_non_grocery_query(self):
+        result = _rule_based_parse("find me a laptop under 50000")
+        assert result["intent"] == QueryIntent.unsupported.value
 
 
 class TestQueryUnderstandingAgentLLM:
@@ -87,8 +91,9 @@ class TestQueryUnderstandingAgentLLM:
         mock_llm.call.side_effect = Exception("LLM unavailable")
         agent = QueryUnderstandingAgent(mock_llm)
         result = await agent.run("cheap milk under 60")
-        assert result.product == "milk"
+        assert result.product == "packaged milk"
         assert result.intent == QueryIntent.product_search
+        assert result.constraints.budget is not None
 
     @pytest.mark.asyncio
     async def test_run_raises_on_empty_query(self):
@@ -125,6 +130,14 @@ class TestNormalizationAgent:
         result = await agent.run("something for evening snacks")
         assert result.canonical_name == "snacks"
         assert len(result.possible_variants) > 0
+
+    @pytest.mark.asyncio
+    async def test_normalization_jeera_maps_to_cumin(self):
+        mock_llm = AsyncMock()
+        mock_llm.call.side_effect = Exception("LLM unavailable")
+        agent = NormalizationAgent(mock_llm)
+        result = await agent.run("jeera")
+        assert result.canonical_name == "cumin seeds"
 
 
 # ---------------------------------------------------------------------------

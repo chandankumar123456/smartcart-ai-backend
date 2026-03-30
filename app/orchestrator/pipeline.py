@@ -72,6 +72,8 @@ class AgentPipeline:
 
         # Step 2: If recipe intent, delegate to recipe pipeline
         sq: StructuredQuery = state["structured_query"]
+        if sq.intent == QueryIntent.unsupported:
+            return self._builder.build_unsupported_response(state)
         if sq.intent == QueryIntent.recipe:
             return await self.run_recipe(query)
 

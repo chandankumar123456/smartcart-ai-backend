@@ -99,6 +99,15 @@ class TestSearchEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert len(data["results"]) > 0
+        assert data["metadata"]["intent"] == "exploratory"
+
+    def test_search_unsupported_query(self, client):
+        response = client.post("/ai/search", json={"query": "best laptop under 50000"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["results"] == []
+        assert data["metadata"]["intent"] == "unsupported"
+        assert "normalized_query" in data["metadata"]
 
 
 class TestRecipeEndpoint:

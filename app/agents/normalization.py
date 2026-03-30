@@ -37,6 +37,12 @@ Rules:
 """
 
 _SAFE_FALLBACKS: Dict[str, Dict[str, Any]] = {
+    "milk": {
+        "canonical_name": "milk",
+        "possible_variants": ["packaged milk", "toned milk", "full cream milk"],
+        "category": "dairy",
+        "attributes": [],
+    },
     "capsicum": {
         "canonical_name": "capsicum",
         "possible_variants": ["green capsicum", "shimla mirch"],
@@ -48,6 +54,30 @@ _SAFE_FALLBACKS: Dict[str, Dict[str, Any]] = {
         "possible_variants": ["atta", "whole wheat atta"],
         "category": "staples",
         "attributes": [],
+    },
+    "jeera": {
+        "canonical_name": "cumin seeds",
+        "possible_variants": ["jeera", "cumin", "cumin seeds"],
+        "category": "staples",
+        "attributes": [],
+    },
+    "mirchi powder": {
+        "canonical_name": "red chili powder",
+        "possible_variants": ["mirchi powder", "red chilli powder", "red chili powder"],
+        "category": "staples",
+        "attributes": [],
+    },
+    "dal": {
+        "canonical_name": "lentils",
+        "possible_variants": ["dal", "lentils"],
+        "category": "staples",
+        "attributes": [],
+    },
+    "ginger piece": {
+        "canonical_name": "ginger",
+        "possible_variants": ["ginger piece", "ginger"],
+        "category": "vegetable",
+        "attributes": ["fresh"],
     },
     "paneer cubes": {
         "canonical_name": "paneer",

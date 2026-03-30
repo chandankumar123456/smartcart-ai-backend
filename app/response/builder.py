@@ -16,6 +16,27 @@ from app.data.models import FinalResponse
 class ResponseBuilder:
     """Assembles FinalResponse from pipeline state."""
 
+    def build_unsupported_response(self, state: Dict[str, Any]) -> FinalResponse:
+        raw_query = state.get("raw_query", "")
+        sq = state.get("structured_query")
+        return FinalResponse(
+            query=raw_query,
+            results=[],
+            best_option={},
+            deals=[],
+            total_price=0.0,
+            metadata={
+                "intent": sq.intent.value if sq else "unsupported",
+                "total_results": 0,
+                "total_deals": 0,
+                "notes": (sq.metadata.notes if sq else "unsupported query"),
+                "confidence": (sq.metadata.confidence if sq else 1.0),
+                "normalized_query": (sq.normalized_query if sq else raw_query),
+                "items": [item.model_dump() for item in (sq.items if sq else [])],
+                "constraints": (sq.constraints.model_dump() if sq else {}),
+            },
+        )
+
     def build_search_response(self, state: Dict[str, Any]) -> FinalResponse:
         raw_query = state.get("raw_query", "")
         ranking = state.get("ranking_result")
@@ -77,6 +98,21 @@ class ResponseBuilder:
                 "intent": state["structured_query"].intent.value if state.get("structured_query") else "",
                 "total_results": len(results),
                 "total_deals": len(deals),
+                "normalized_query": (
+                    state["structured_query"].normalized_query if state.get("structured_query") else raw_query
+                ),
+                "confidence": (
+                    state["structured_query"].metadata.confidence if state.get("structured_query") else 0.0
+                ),
+                "notes": (
+                    state["structured_query"].metadata.notes if state.get("structured_query") else ""
+                ),
+                "items": [
+                    item.model_dump() for item in (state["structured_query"].items if state.get("structured_query") else [])
+                ],
+                "constraints": (
+                    state["structured_query"].constraints.model_dump() if state.get("structured_query") else {}
+                ),
             },
         )
 

@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field
 class QueryIntent(str, Enum):
     product_search = "product_search"
     recipe = "recipe"
+    cart_optimization = "cart_optimization"
+    exploratory = "exploratory"
+    unsupported = "unsupported"
+    # Backward-compatible aliases used in older pipeline/tests.
     deal_search = "deal_search"
     cart_optimize = "cart_optimize"
 
@@ -31,12 +35,39 @@ class QueryFilters(BaseModel):
     brand: Optional[str] = None
 
 
+class ItemAttributes(BaseModel):
+    quantity: Optional[float] = None
+    unit: Optional[str] = None
+    preferences: List[str] = Field(default_factory=list)
+
+
+class StructuredItem(BaseModel):
+    name: str
+    category: str = "general"
+    attributes: ItemAttributes = Field(default_factory=ItemAttributes)
+
+
+class QueryConstraints(BaseModel):
+    budget: Optional[Dict[str, Any]] = None
+    servings: Optional[int] = None
+    preferences: List[str] = Field(default_factory=list)
+
+
+class QueryMetadata(BaseModel):
+    confidence: float = 0.0
+    notes: str = ""
+
+
 class StructuredQuery(BaseModel):
     """Output of QueryUnderstandingAgent."""
 
     product: str = Field(..., description="Primary product or entity extracted from query")
     filters: QueryFilters = Field(default_factory=QueryFilters)
     intent: QueryIntent = Field(default=QueryIntent.product_search)
+    normalized_query: str = ""
+    items: List[StructuredItem] = Field(default_factory=list)
+    constraints: QueryConstraints = Field(default_factory=QueryConstraints)
+    metadata: QueryMetadata = Field(default_factory=QueryMetadata)
     raw_query: str = Field(..., description="Original user query")
 
 
