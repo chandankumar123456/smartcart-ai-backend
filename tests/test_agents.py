@@ -56,6 +56,14 @@ class TestQueryUnderstandingAgentRuleBased:
         result = _rule_based_parse("tomato")
         assert result["product"] == "tomato"
 
+    def test_generic_ingredient_terms_extracted(self):
+        result = _rule_based_parse("need chicken and curd")
+        assert result["product"] in {"chicken", "curd"}
+
+    def test_ghee_known_product(self):
+        result = _rule_based_parse("buy ghee")
+        assert result["product"] == "ghee"
+
 
 class TestQueryUnderstandingAgentLLM:
     @pytest.mark.asyncio
@@ -122,6 +130,33 @@ class TestProductMatchingAgent:
         sq = StructuredQuery(product="xyz_nonexistent", filters=QueryFilters(), intent=QueryIntent.product_search, raw_query="xyz")
         result = await agent.run(sq)
         assert result.platforms == []
+
+    @pytest.mark.asyncio
+    async def test_match_generic_chicken_term(self):
+        agent = ProductMatchingAgent()
+        sq = StructuredQuery(product="chicken", filters=QueryFilters(), intent=QueryIntent.product_search, raw_query="chicken")
+        result = await agent.run(sq)
+        assert len(result.platforms) > 0
+
+    @pytest.mark.asyncio
+    async def test_match_synonym_dahi_to_curd(self):
+        agent = ProductMatchingAgent()
+        sq = StructuredQuery(product="dahi", filters=QueryFilters(), intent=QueryIntent.product_search, raw_query="dahi")
+        result = await agent.run(sq)
+        assert len(result.platforms) > 0
+        assert all(p.normalized_name == "curd" for p in result.platforms)
+
+    @pytest.mark.asyncio
+    async def test_top_k_fallback_when_filters_remove_all(self):
+        agent = ProductMatchingAgent()
+        sq = StructuredQuery(
+            product="ghee",
+            filters=QueryFilters(max_price=10.0),
+            intent=QueryIntent.product_search,
+            raw_query="cheap ghee under 10",
+        )
+        result = await agent.run(sq)
+        assert len(result.platforms) == 3
 
 
 # ---------------------------------------------------------------------------

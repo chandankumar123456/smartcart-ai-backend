@@ -14,6 +14,7 @@ LangGraph is not installed.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from app.agents.deal_detection import DealDetectionAgent
@@ -33,6 +34,8 @@ from app.data.models import (
 )
 from app.llm.manager import LLMManager, get_llm_manager
 from app.response.builder import ResponseBuilder
+
+logger = logging.getLogger(__name__)
 
 
 class AgentPipeline:
@@ -58,6 +61,7 @@ class AgentPipeline:
 
     async def run_search(self, query: str) -> FinalResponse:
         """Execute the full search pipeline for a user query."""
+        logger.debug("[ENTRY] endpoint=/ai/search query=%s type=search", query)
         state: Dict[str, Any] = {"raw_query": query}
 
         # Step 1: Understand query
@@ -73,20 +77,41 @@ class AgentPipeline:
 
         # Step 4: Rank
         state["ranking_result"] = await self._ranking_agent.run(state["unified_product"])
+        logger.debug(
+            "[RANKING] items_processed=%s",
+            len(state["ranking_result"].ranked_list),
+        )
 
         # Step 5: Detect deals
         state["deal_result"] = await self._deal_agent.run(state["unified_product"])
+        logger.debug("[DEALS] deals_count=%s", len(state["deal_result"].deals))
 
-        return self._builder.build_search_response(state)
+        response = self._builder.build_search_response(state)
+        logger.debug(
+            "[FINAL_OUTPUT] result_count=%s total_price=%s deals=%s",
+            len(response.results),
+            response.total_price,
+            len(response.deals),
+        )
+        return response
 
     async def run_recipe(self, query: str, servings: int = 2) -> FinalResponse:
         """Execute the recipe pipeline."""
+        logger.debug("[ENTRY] endpoint=/ai/recipe query=%s type=recipe", query)
         state: Dict[str, Any] = {"raw_query": query}
         state["recipe_result"] = await self._recipe_agent.run(query, servings)
-        return self._builder.build_recipe_response(state)
+        response = self._builder.build_recipe_response(state)
+        logger.debug(
+            "[FINAL_OUTPUT] result_count=%s total_price=%s deals=%s",
+            len(response.results),
+            response.total_price,
+            len(response.deals),
+        )
+        return response
 
     async def run_cart_optimize(self, items: List[CartItem]) -> FinalResponse:
         """Find the optimal platform split for a list of cart items."""
+        logger.debug("[ENTRY] endpoint=/ai/cart-optimize query=%s type=cart_optimize", ",".join(i.name for i in items))
         state: Dict[str, Any] = {"cart_items": items}
 
         # For each item, find cheapest option across platforms
@@ -133,7 +158,14 @@ class AgentPipeline:
             savings=savings,
         )
         state["cart_result"] = result
-        return self._builder.build_cart_response(state)
+        response = self._builder.build_cart_response(state)
+        logger.debug(
+            "[FINAL_OUTPUT] result_count=%s total_price=%s deals=%s",
+            len(response.results),
+            response.total_price,
+            len(response.deals),
+        )
+        return response
 
 
 # Module-level singleton

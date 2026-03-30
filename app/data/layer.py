@@ -6,7 +6,7 @@ request path (see architecture principles).
 """
 
 import random
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.data.models import Platform, PlatformProduct, PriceHistory, PricePoint
 
@@ -80,6 +80,21 @@ _MOCK_PRODUCTS: Dict[str, List[dict]] = {
         {"platform": Platform.bigbasket, "product_id": "bb-sugar-001", "name": "BB Sugar 1kg", "normalized_name": "sugar", "price": 43.0, "original_price": 48.0, "unit": "1kg", "rating": 4.2, "delivery_time_minutes": 30, "discount_percent": 10.4},
         {"platform": Platform.dmart, "product_id": "dm-sugar-001", "name": "DMart Sugar 1kg", "normalized_name": "sugar", "price": 40.0, "original_price": 44.0, "unit": "1kg", "rating": 4.1, "delivery_time_minutes": 60, "discount_percent": 9.1},
     ],
+    "curd": [
+        {"platform": Platform.blinkit, "product_id": "bl-curd-001", "name": "Amul Masti Dahi 400g", "normalized_name": "curd", "price": 35.0, "original_price": 38.0, "unit": "400g", "rating": 4.4, "delivery_time_minutes": 12, "discount_percent": 7.9},
+        {"platform": Platform.zepto, "product_id": "zp-curd-001", "name": "Mother Dairy Fresh Curd 400g", "normalized_name": "curd", "price": 32.0, "original_price": 35.0, "unit": "400g", "rating": 4.3, "delivery_time_minutes": 10, "discount_percent": 8.6},
+        {"platform": Platform.bigbasket, "product_id": "bb-curd-001", "name": "Milky Mist Curd 400g", "normalized_name": "curd", "price": 34.0, "original_price": 36.0, "unit": "400g", "rating": 4.5, "delivery_time_minutes": 30, "discount_percent": 5.6},
+    ],
+    "ghee": [
+        {"platform": Platform.blinkit, "product_id": "bl-ghee-001", "name": "Amul Pure Ghee 200ml", "normalized_name": "ghee", "price": 320.0, "original_price": 340.0, "unit": "200ml", "rating": 4.6, "delivery_time_minutes": 12, "discount_percent": 5.9},
+        {"platform": Platform.zepto, "product_id": "zp-ghee-001", "name": "Patanjali Cow Ghee 200ml", "normalized_name": "ghee", "price": 280.0, "original_price": 305.0, "unit": "200ml", "rating": 4.3, "delivery_time_minutes": 10, "discount_percent": 8.2},
+        {"platform": Platform.bigbasket, "product_id": "bb-ghee-001", "name": "Aashirvaad Svasti Ghee 200ml", "normalized_name": "ghee", "price": 295.0, "original_price": 315.0, "unit": "200ml", "rating": 4.4, "delivery_time_minutes": 30, "discount_percent": 6.3},
+    ],
+    "chicken": [
+        {"platform": Platform.blinkit, "product_id": "bl-chicken-001", "name": "Fresh Chicken Curry Cut 500g", "normalized_name": "chicken", "price": 189.0, "original_price": 210.0, "unit": "500g", "rating": 4.2, "delivery_time_minutes": 12, "discount_percent": 10.0},
+        {"platform": Platform.zepto, "product_id": "zp-chicken-001", "name": "Fresh Chicken Breast Boneless 500g", "normalized_name": "chicken", "price": 205.0, "original_price": 220.0, "unit": "500g", "rating": 4.4, "delivery_time_minutes": 10, "discount_percent": 6.8},
+        {"platform": Platform.instamart, "product_id": "im-chicken-001", "name": "Broiler Fresh Chicken 500g", "normalized_name": "chicken", "price": 195.0, "original_price": 210.0, "unit": "500g", "rating": 4.3, "delivery_time_minutes": 15, "discount_percent": 7.1},
+    ],
 }
 
 # Aliases: maps query terms to catalogue keys
@@ -102,6 +117,37 @@ _PRODUCT_ALIASES: Dict[str, str] = {
     "penne pasta": "pasta",
     "cane sugar": "sugar",
     "white sugar": "sugar",
+    "dahi": "curd",
+    "yoghurt": "curd",
+    "yogurt": "curd",
+    "fresh curd": "curd",
+    "desi ghee": "ghee",
+    "cow ghee": "ghee",
+    "chicken breast": "chicken",
+    "chicken curry cut": "chicken",
+    "fresh chicken": "chicken",
+}
+
+_QUERY_EXPANSIONS: Dict[str, List[str]] = {
+    "chicken": ["chicken breast", "chicken curry cut", "fresh chicken"],
+    "curd": ["dahi", "yogurt", "fresh curd"],
+    "ghee": ["desi ghee", "cow ghee"],
+}
+
+_CATEGORY_TO_ENTITIES: Dict[str, List[str]] = {
+    "dairy": ["milk", "curd", "butter", "ghee"],
+    "poultry": ["chicken", "eggs"],
+    "staples": ["rice", "sugar", "oil"],
+}
+
+_TERM_TO_CATEGORY: Dict[str, str] = {
+    "milk": "dairy",
+    "curd": "dairy",
+    "dahi": "dairy",
+    "yogurt": "dairy",
+    "yoghurt": "dairy",
+    "ghee": "dairy",
+    "chicken": "poultry",
 }
 
 
@@ -111,17 +157,99 @@ def _normalize(term: str) -> str:
     return _PRODUCT_ALIASES.get(term, term)
 
 
+def _unique(items: List[str]) -> List[str]:
+    """Return items without duplicates while preserving insertion order."""
+    seen = set()
+    result = []
+    for item in items:
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+def _expand_query_terms(entity: str) -> List[str]:
+    base = _normalize(entity)
+    variants = [base] + _QUERY_EXPANSIONS.get(base, [])
+    return _unique([_normalize(v) for v in variants])
+
+
+def _tokenize(text: str) -> List[str]:
+    return [t for t in text.lower().replace("-", " ").split() if t]
+
+
+def match_products_for_entity(entity: str) -> Tuple[List[PlatformProduct], Dict[str, Any]]:
+    """Return matched products and structured matching diagnostics.
+
+    Returns:
+        tuple[list[PlatformProduct], dict]:
+            - products: merged product list for all matched catalogue keys.
+            - metadata: debug details containing input term, expanded terms,
+              matched catalogue keys, and fallback flags/reasons.
+
+    Strategy:
+        1) normalize + expand query term variants
+        2) fuzzy token matching against catalogue keys and product titles
+        3) category fallback when no direct/fuzzy key match is found
+    """
+    expanded_terms = _expand_query_terms(entity)
+
+    matched_keys: List[str] = []
+    for key in _MOCK_PRODUCTS:
+        key_tokens = set(_tokenize(key))
+        for term in expanded_terms:
+            term_tokens = set(_tokenize(term))
+            if term == key:
+                matched_keys.append(key)
+                break
+            if key_tokens.intersection(term_tokens):
+                matched_keys.append(key)
+                break
+            if any(
+                set(_tokenize(item["name"])).intersection(term_tokens)
+                for item in _MOCK_PRODUCTS[key]
+            ):
+                matched_keys.append(key)
+                break
+    matched_keys = _unique(matched_keys)
+
+    fallback_triggered = False
+    fallback_reason = ""
+    if not matched_keys:
+        for term in expanded_terms:
+            category = _TERM_TO_CATEGORY.get(term)
+            if category:
+                matched_keys = _CATEGORY_TO_ENTITIES.get(category, [])
+                fallback_triggered = True
+                fallback_reason = f"category_fallback:{category}"
+                break
+
+    raw: List[dict] = []
+    seen_ids = set()
+    for key in matched_keys:
+        for item in _MOCK_PRODUCTS.get(key, []):
+            dedupe_key = (item["platform"], item["product_id"])
+            if dedupe_key in seen_ids:
+                continue
+            seen_ids.add(dedupe_key)
+            raw.append(item)
+
+    return (
+        [PlatformProduct(**item) for item in raw],
+        {
+            "input_term": entity,
+            "expanded_terms": expanded_terms,
+            "matched_keys": matched_keys,
+            "fallback_triggered": fallback_triggered,
+            "fallback_reason": fallback_reason,
+        },
+    )
+
+
 def get_products_for_entity(entity: str) -> List[PlatformProduct]:
     """Return PlatformProduct list for a normalized entity name."""
-    key = _normalize(entity)
-    raw = _MOCK_PRODUCTS.get(key, [])
-    # Fuzzy fallback: partial match
-    if not raw:
-        for cat_key, cat_items in _MOCK_PRODUCTS.items():
-            if key in cat_key or cat_key in key:
-                raw = cat_items
-                break
-    return [PlatformProduct(**item) for item in raw]
+    products, _ = match_products_for_entity(entity)
+    return products
 
 
 def get_price_history(entity: str, platform: Platform) -> PriceHistory:

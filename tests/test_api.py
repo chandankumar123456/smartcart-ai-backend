@@ -70,6 +70,18 @@ class TestSearchEndpoint:
         data = response.json()
         assert len(data["results"]) > 0
 
+    def test_search_generic_chicken_has_results(self, client):
+        response = client.post("/ai/search", json={"query": "chicken"})
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["results"]) > 0
+
+    def test_search_generic_curd_alias_has_results(self, client):
+        response = client.post("/ai/search", json={"query": "dahi"})
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["results"]) > 0
+
 
 class TestRecipeEndpoint:
     def test_recipe_valid_query(self, client):

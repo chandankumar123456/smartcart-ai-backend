@@ -10,9 +10,14 @@ Input: StructuredQuery
 Output: UnifiedProduct (list of PlatformProduct per platform)
 """
 
+import logging
+
 from app.core.exceptions import AgentException
-from app.data.layer import get_products_for_entity
+from app.data.layer import match_products_for_entity
 from app.data.models import PlatformProduct, QueryFilters, StructuredQuery, UnifiedProduct
+
+logger = logging.getLogger(__name__)
+TOP_K_FALLBACK = 3
 
 
 class ProductMatchingAgent:
@@ -27,15 +32,39 @@ class ProductMatchingAgent:
         if not entity:
             raise AgentException("ProductMatchingAgent", "No product entity provided")
 
-        products = get_products_for_entity(entity)
+        products, match_meta = match_products_for_entity(entity)
+        logger.debug(
+            "[MATCHING] input_term=%s expanded_terms=%s matches_found=%s matched_products=%s",
+            match_meta["input_term"],
+            match_meta["expanded_terms"],
+            len(match_meta["matched_keys"]),
+            [p.name for p in products],
+        )
 
         # Apply price filter
-        products = self._apply_filters(products, structured_query.filters)
+        filtered_products = self._apply_filters(products, structured_query.filters)
+
+        fallback_triggered = False
+        fallback_reason = ""
+        if not filtered_products and products:
+            fallback_triggered = True
+            fallback_reason = "relax_filters_top_k"
+            filtered_products = sorted(products, key=lambda p: p.price)[:TOP_K_FALLBACK]
+
+        if match_meta["fallback_triggered"]:
+            fallback_triggered = True
+            fallback_reason = match_meta["fallback_reason"] or fallback_reason
+
+        logger.debug(
+            "[FALLBACK] triggered=%s reason=%s",
+            fallback_triggered,
+            fallback_reason,
+        )
 
         return UnifiedProduct(
             entity=entity,
             normalized_name=entity.lower().strip(),
-            platforms=products,
+            platforms=filtered_products,
         )
 
     @staticmethod
