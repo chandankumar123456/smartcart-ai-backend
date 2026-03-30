@@ -63,6 +63,36 @@ class TestSearchPipeline:
         result = await pipeline.run_search("dahi")
         assert len(result.results) > 0
 
+    @pytest.mark.asyncio
+    async def test_search_capsicum_returns_results(self, pipeline):
+        result = await pipeline.run_search("capsicum")
+        assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_atta_returns_results(self, pipeline):
+        result = await pipeline.run_search("atta")
+        assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_paneer_cubes_returns_results(self, pipeline):
+        result = await pipeline.run_search("paneer cubes")
+        assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_salad_leaves_returns_results(self, pipeline):
+        result = await pipeline.run_search("salad leaves")
+        assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_evening_snacks_returns_results(self, pipeline):
+        result = await pipeline.run_search("something for evening snacks")
+        assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_vague_multi_item_query_returns_results(self, pipeline):
+        result = await pipeline.run_search("need paneer cubes and salad leaves for dinner")
+        assert len(result.results) > 0
+
 
 class TestRecipePipeline:
     @pytest.mark.asyncio

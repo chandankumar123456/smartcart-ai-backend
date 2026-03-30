@@ -40,6 +40,15 @@ class StructuredQuery(BaseModel):
     raw_query: str = Field(..., description="Original user query")
 
 
+class NormalizedItem(BaseModel):
+    """Normalized product intent used before matching."""
+
+    canonical_name: str
+    possible_variants: List[str] = []
+    category: Optional[str] = None
+    attributes: List[str] = []
+
+
 # ---------------------------------------------------------------------------
 # Product / Platform
 # ---------------------------------------------------------------------------

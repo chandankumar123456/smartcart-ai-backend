@@ -18,6 +18,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from app.agents.deal_detection import DealDetectionAgent
+from app.agents.normalization import NormalizationAgent
 from app.agents.product_matching import ProductMatchingAgent
 from app.agents.query_understanding import QueryUnderstandingAgent
 from app.agents.ranking import RankingAgent
@@ -50,6 +51,7 @@ class AgentPipeline:
         llm = llm_manager or get_llm_manager()
         self._query_agent = QueryUnderstandingAgent(llm)
         self._product_agent = ProductMatchingAgent()
+        self._normalization_agent = NormalizationAgent(llm)
         self._ranking_agent = RankingAgent()
         self._deal_agent = DealDetectionAgent()
         self._recipe_agent = RecipeAgent(llm)
@@ -66,6 +68,7 @@ class AgentPipeline:
 
         # Step 1: Understand query
         state["structured_query"] = await self._query_agent.run(query)
+        state["normalized_item"] = await self._normalization_agent.run(query)
 
         # Step 2: If recipe intent, delegate to recipe pipeline
         sq: StructuredQuery = state["structured_query"]
@@ -73,7 +76,7 @@ class AgentPipeline:
             return await self.run_recipe(query)
 
         # Step 3: Match products
-        state["unified_product"] = await self._product_agent.run(sq)
+        state["unified_product"] = await self._product_agent.run(sq, state["normalized_item"])
 
         # Step 4: Rank
         state["ranking_result"] = await self._ranking_agent.run(state["unified_product"])
@@ -111,13 +114,17 @@ class AgentPipeline:
 
     async def run_cart_optimize(self, items: List[CartItem]) -> FinalResponse:
         """Find the optimal platform split for a list of cart items."""
-        logger.debug("[ENTRY] endpoint=/ai/cart-optimize query=%s type=cart_optimize", ",".join(i.name for i in items))
+        logger.debug(
+            "[ENTRY] endpoint=/ai/cart-optimize query=%s type=cart_optimize",
+            ",".join(item.name for item in items),
+        )
         state: Dict[str, Any] = {"cart_items": items}
 
         # For each item, find cheapest option across platforms
         item_cheapest: Dict[str, Any] = {}
         for item in items:
-            products = get_products_for_entity(item.name)
+            normalized_item = await self._normalization_agent.run(item.name)
+            products = get_products_for_entity(normalized_item.canonical_name)
             if not products:
                 continue
             cheapest = min(
@@ -144,7 +151,8 @@ class AgentPipeline:
         # Compare with single-platform cost
         single_platform_costs: Dict[str, float] = {}
         for item in items:
-            products = get_products_for_entity(item.name)
+            normalized_item = await self._normalization_agent.run(item.name)
+            products = get_products_for_entity(normalized_item.canonical_name)
             for p in products:
                 plat = p.platform.value
                 single_platform_costs[plat] = single_platform_costs.get(plat, 0) + p.price

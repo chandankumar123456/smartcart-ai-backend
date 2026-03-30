@@ -82,6 +82,24 @@ class TestSearchEndpoint:
         data = response.json()
         assert len(data["results"]) > 0
 
+    def test_search_capsicum_has_results(self, client):
+        response = client.post("/ai/search", json={"query": "capsicum"})
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["results"]) > 0
+
+    def test_search_paneer_cubes_has_results(self, client):
+        response = client.post("/ai/search", json={"query": "paneer cubes"})
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["results"]) > 0
+
+    def test_search_evening_snacks_has_results(self, client):
+        response = client.post("/ai/search", json={"query": "something for evening snacks"})
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["results"]) > 0
+
 
 class TestRecipeEndpoint:
     def test_recipe_valid_query(self, client):

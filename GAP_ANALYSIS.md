@@ -63,3 +63,79 @@ After:
 
 ## 9. Status
 FIXED
+
+---
+
+## 1. Gap Title
+Static Matching Limitation for Open-Ended Queries
+
+## 2. Description
+The prior fix improved known generic terms but still relied heavily on finite static mappings. Open-ended or diverse user expressions (for example, "paneer cubes", "green leaves for salad", "something for evening snacks") were not consistently normalized into searchable grocery entities.
+
+## 3. Affected Modules
+- QueryUnderstandingAgent
+- NormalizationAgent (new)
+- ProductMatchingAgent
+- Recipe Pipeline
+- Cart Optimization Pipeline
+
+## 4. Evidence
+- Before:
+  - input: "capsicum" → inconsistent normalization path, could miss
+  - input: "paneer cubes" → treated as literal phrase, matching fragile
+  - input: "something for evening snacks" → vague intent often unmatched
+
+- After:
+  - [NORMALIZATION] input="capsicum"
+  - [NORMALIZATION] canonical="capsicum"
+  - [NORMALIZATION] variants=["capsicum","green capsicum","shimla mirch"]
+  - [NORMALIZATION] category="vegetable"
+
+  - [NORMALIZATION] input="paneer cubes"
+  - [NORMALIZATION] canonical="paneer"
+  - [NORMALIZATION] variants=["paneer","paneer cubes","fresh paneer"]
+  - [NORMALIZATION] category="dairy"
+
+  - [NORMALIZATION] input="something for evening snacks"
+  - [NORMALIZATION] canonical="snacks"
+  - [NORMALIZATION] variants=["snacks","chips","biscuits","namkeen"]
+  - [NORMALIZATION] category="snacks"
+
+## 5. Root Cause
+Matching robustness was bottlenecked by static dictionaries and direct lexical overlap. User language is unbounded and often vague, so exact/finite mappings alone cannot scale to real query diversity.
+
+## 6. Fix Applied
+- Introduced **NormalizationAgent** (LLM-first) between query understanding and matching.
+- Normalization output now enforces strict structure:
+  - `canonical_name`
+  - `possible_variants`
+  - `category`
+  - `attributes`
+- Integrated normalized terms into ProductMatchingAgent matching flow.
+- Added fallback reduction strategy:
+  - fallback only after normalization + matching still yield no hits
+  - safe deterministic normalization fallback when LLM fails
+- Extended structured logs for normalization stage and traceability.
+
+## 7. Before vs After Behavior
+Before:
+- Open-ended or unseen phrasing could produce empty/weak matches.
+- Behavior depended on predefined mappings.
+
+After:
+- Dynamic normalization converts vague/unseen phrasing into searchable intents.
+- Matching receives canonical + variant terms, increasing non-empty results.
+- Breakdown point (normalization vs matching) is observable via logs.
+
+## 8. Validation
+- Queries now covered in tests:
+  - "capsicum"
+  - "atta"
+  - "paneer cubes"
+  - "salad leaves"
+  - "something for evening snacks"
+- Unit + pipeline + API tests assert non-empty results for these cases.
+- Existing search flows remain passing.
+
+## 9. Status
+FIXED

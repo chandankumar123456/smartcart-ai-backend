@@ -14,7 +14,7 @@ import logging
 
 from app.core.exceptions import AgentException
 from app.data.layer import match_products_for_entity
-from app.data.models import PlatformProduct, QueryFilters, StructuredQuery, UnifiedProduct
+from app.data.models import NormalizedItem, PlatformProduct, QueryFilters, StructuredQuery, UnifiedProduct
 
 logger = logging.getLogger(__name__)
 TOP_K_FALLBACK = 3
@@ -27,12 +27,18 @@ class ProductMatchingAgent:
     post-fetch filtering based on the structured query filters.
     """
 
-    async def run(self, structured_query: StructuredQuery) -> UnifiedProduct:
-        entity = structured_query.product
+    async def run(
+        self,
+        structured_query: StructuredQuery,
+        normalized_item: NormalizedItem | None = None,
+    ) -> UnifiedProduct:
+        entity = normalized_item.canonical_name if normalized_item else structured_query.product
         if not entity:
             raise AgentException("ProductMatchingAgent", "No product entity provided")
 
-        products, match_meta = match_products_for_entity(entity)
+        variants = normalized_item.possible_variants if normalized_item else None
+        category = normalized_item.category if normalized_item else None
+        products, match_meta = match_products_for_entity(entity, possible_variants=variants, category=category)
         logger.debug(
             "[MATCHING] input_term=%s expanded_terms=%s matches_found=%s matched_products=%s",
             match_meta["input_term"],

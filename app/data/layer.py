@@ -95,6 +95,27 @@ _MOCK_PRODUCTS: Dict[str, List[dict]] = {
         {"platform": Platform.zepto, "product_id": "zp-chicken-001", "name": "Fresh Chicken Breast Boneless 500g", "normalized_name": "chicken", "price": 205.0, "original_price": 220.0, "unit": "500g", "rating": 4.4, "delivery_time_minutes": 10, "discount_percent": 6.8},
         {"platform": Platform.instamart, "product_id": "im-chicken-001", "name": "Broiler Fresh Chicken 500g", "normalized_name": "chicken", "price": 195.0, "original_price": 210.0, "unit": "500g", "rating": 4.3, "delivery_time_minutes": 15, "discount_percent": 7.1},
     ],
+    "capsicum": [
+        {"platform": Platform.blinkit, "product_id": "bl-capsicum-001", "name": "Fresh Green Capsicum 500g", "normalized_name": "capsicum", "price": 42.0, "original_price": 48.0, "unit": "500g", "rating": 4.1, "delivery_time_minutes": 12, "discount_percent": 12.5},
+        {"platform": Platform.zepto, "product_id": "zp-capsicum-001", "name": "Shimla Mirch 500g", "normalized_name": "capsicum", "price": 40.0, "original_price": 45.0, "unit": "500g", "rating": 4.2, "delivery_time_minutes": 10, "discount_percent": 11.1},
+    ],
+    "paneer": [
+        {"platform": Platform.blinkit, "product_id": "bl-paneer-001", "name": "Fresh Paneer Cubes 200g", "normalized_name": "paneer", "price": 95.0, "original_price": 105.0, "unit": "200g", "rating": 4.5, "delivery_time_minutes": 12, "discount_percent": 9.5},
+        {"platform": Platform.bigbasket, "product_id": "bb-paneer-001", "name": "Malai Paneer 200g", "normalized_name": "paneer", "price": 90.0, "original_price": 100.0, "unit": "200g", "rating": 4.4, "delivery_time_minutes": 30, "discount_percent": 10.0},
+    ],
+    "wheat flour": [
+        {"platform": Platform.blinkit, "product_id": "bl-atta-001", "name": "Aashirvaad Whole Wheat Atta 5kg", "normalized_name": "wheat flour", "price": 265.0, "original_price": 285.0, "unit": "5kg", "rating": 4.4, "delivery_time_minutes": 12, "discount_percent": 7.0},
+        {"platform": Platform.dmart, "product_id": "dm-atta-001", "name": "DMart Wheat Flour Atta 5kg", "normalized_name": "wheat flour", "price": 240.0, "original_price": 260.0, "unit": "5kg", "rating": 4.2, "delivery_time_minutes": 60, "discount_percent": 7.7},
+    ],
+    "snacks": [
+        {"platform": Platform.zepto, "product_id": "zp-snacks-001", "name": "Classic Salted Chips 100g", "normalized_name": "snacks", "price": 30.0, "original_price": 35.0, "unit": "100g", "rating": 4.0, "delivery_time_minutes": 10, "discount_percent": 14.3},
+        {"platform": Platform.bigbasket, "product_id": "bb-snacks-001", "name": "Namkeen Mixture 200g", "normalized_name": "snacks", "price": 55.0, "original_price": 60.0, "unit": "200g", "rating": 4.1, "delivery_time_minutes": 30, "discount_percent": 8.3},
+        {"platform": Platform.instamart, "product_id": "im-snacks-001", "name": "Marie Biscuits 250g", "normalized_name": "snacks", "price": 42.0, "original_price": 45.0, "unit": "250g", "rating": 4.2, "delivery_time_minutes": 15, "discount_percent": 6.7},
+    ],
+    "salad": [
+        {"platform": Platform.zepto, "product_id": "zp-salad-001", "name": "Fresh Salad Leaves 200g", "normalized_name": "salad", "price": 65.0, "original_price": 70.0, "unit": "200g", "rating": 4.1, "delivery_time_minutes": 10, "discount_percent": 7.1},
+        {"platform": Platform.blinkit, "product_id": "bl-salad-001", "name": "Lettuce Iceberg 1pc", "normalized_name": "salad", "price": 58.0, "original_price": 65.0, "unit": "1 pc", "rating": 4.0, "delivery_time_minutes": 12, "discount_percent": 10.8},
+    ],
 }
 
 # Aliases: maps query terms to catalogue keys
@@ -126,18 +147,32 @@ _PRODUCT_ALIASES: Dict[str, str] = {
     "chicken breast": "chicken",
     "chicken curry cut": "chicken",
     "fresh chicken": "chicken",
+    "shimla mirch": "capsicum",
+    "green capsicum": "capsicum",
+    "paneer cubes": "paneer",
+    "fresh paneer": "paneer",
+    "snack": "snacks",
+    "salad leaves": "salad",
+    "green leaves": "salad",
 }
 
 _QUERY_EXPANSIONS: Dict[str, List[str]] = {
     "chicken": ["chicken breast", "chicken curry cut", "fresh chicken"],
     "curd": ["dahi", "yogurt", "fresh curd"],
     "ghee": ["desi ghee", "cow ghee"],
+    "capsicum": ["green capsicum", "shimla mirch"],
+    "paneer": ["paneer cubes", "fresh paneer"],
+    "snacks": ["chips", "biscuits", "namkeen"],
+    "salad": ["salad leaves", "lettuce", "green leaves"],
+    "wheat flour": ["atta", "whole wheat atta"],
 }
 
 _CATEGORY_TO_ENTITIES: Dict[str, List[str]] = {
     "dairy": ["milk", "curd", "butter", "ghee"],
     "poultry": ["chicken", "eggs"],
     "staples": ["rice", "sugar", "oil"],
+    "vegetable": ["capsicum", "tomato", "onion", "salad"],
+    "snacks": ["snacks", "bread", "butter"],
 }
 
 _TERM_TO_CATEGORY: Dict[str, str] = {
@@ -148,6 +183,12 @@ _TERM_TO_CATEGORY: Dict[str, str] = {
     "yoghurt": "dairy",
     "ghee": "dairy",
     "chicken": "poultry",
+    "capsicum": "vegetable",
+    "paneer": "dairy",
+    "atta": "staples",
+    "wheat flour": "staples",
+    "snacks": "snacks",
+    "salad": "vegetable",
 }
 
 
@@ -159,13 +200,7 @@ def _normalize(term: str) -> str:
 
 def _unique(items: List[str]) -> List[str]:
     """Return items without duplicates while preserving insertion order."""
-    seen = set()
-    result = []
-    for item in items:
-        if item and item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
+    return list(dict.fromkeys([item for item in items if item]))
 
 
 def _expand_query_terms(entity: str) -> List[str]:
@@ -178,7 +213,26 @@ def _tokenize(text: str) -> List[str]:
     return [t for t in text.lower().replace("-", " ").split() if t]
 
 
-def match_products_for_entity(entity: str) -> Tuple[List[PlatformProduct], Dict[str, Any]]:
+def _fallback_from_category(
+    matched_keys: List[str],
+    fallback_triggered: bool,
+    fallback_reason: str,
+    category_value: Optional[str],
+) -> Tuple[List[str], bool, str]:
+    if matched_keys or not category_value:
+        return matched_keys, fallback_triggered, fallback_reason
+    normalized = category_value.lower().strip()
+    keys = _CATEGORY_TO_ENTITIES.get(normalized, [])
+    if keys:
+        return keys, True, f"category_fallback:{normalized}"
+    return matched_keys, fallback_triggered, fallback_reason
+
+
+def match_products_for_entity(
+    entity: str,
+    possible_variants: Optional[List[str]] = None,
+    category: Optional[str] = None,
+) -> Tuple[List[PlatformProduct], Dict[str, Any]]:
     """Return matched products and structured matching diagnostics.
 
     Returns:
@@ -193,6 +247,10 @@ def match_products_for_entity(entity: str) -> Tuple[List[PlatformProduct], Dict[
         3) category fallback when no direct/fuzzy key match is found
     """
     expanded_terms = _expand_query_terms(entity)
+    if possible_variants:
+        for variant in possible_variants:
+            expanded_terms.extend(_expand_query_terms(variant))
+    expanded_terms = _unique(expanded_terms)
 
     matched_keys: List[str] = []
     for key in _MOCK_PRODUCTS:
@@ -216,12 +274,15 @@ def match_products_for_entity(entity: str) -> Tuple[List[PlatformProduct], Dict[
     fallback_triggered = False
     fallback_reason = ""
     if not matched_keys:
+        matched_keys, fallback_triggered, fallback_reason = _fallback_from_category(
+            matched_keys, fallback_triggered, fallback_reason, category
+        )
         for term in expanded_terms:
-            category = _TERM_TO_CATEGORY.get(term)
-            if category:
-                matched_keys = _CATEGORY_TO_ENTITIES.get(category, [])
-                fallback_triggered = True
-                fallback_reason = f"category_fallback:{category}"
+            inferred_category = _TERM_TO_CATEGORY.get(term)
+            matched_keys, fallback_triggered, fallback_reason = _fallback_from_category(
+                matched_keys, fallback_triggered, fallback_reason, inferred_category
+            )
+            if matched_keys:
                 break
 
     raw: List[dict] = []

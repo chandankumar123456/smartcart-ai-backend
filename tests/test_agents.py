@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.agents.deal_detection import DealDetectionAgent
+from app.agents.normalization import NormalizationAgent
 from app.agents.product_matching import ProductMatchingAgent
 from app.agents.query_understanding import QueryUnderstandingAgent, _rule_based_parse
 from app.agents.ranking import RankingAgent
@@ -58,7 +59,7 @@ class TestQueryUnderstandingAgentRuleBased:
 
     def test_generic_ingredient_terms_extracted(self):
         result = _rule_based_parse("need chicken and curd")
-        assert result["product"] in {"chicken", "curd"}
+        assert result["product"] == "chicken"
 
     def test_ghee_known_product(self):
         result = _rule_based_parse("buy ghee")
@@ -95,6 +96,35 @@ class TestQueryUnderstandingAgentLLM:
         agent = QueryUnderstandingAgent(mock_llm)
         with pytest.raises(Exception, match="Empty query"):
             await agent.run("")
+
+
+class TestNormalizationAgent:
+    @pytest.mark.asyncio
+    async def test_normalization_capsicum(self):
+        mock_llm = AsyncMock()
+        mock_llm.call.side_effect = Exception("LLM unavailable")
+        agent = NormalizationAgent(mock_llm)
+        result = await agent.run("capsicum")
+        assert result.canonical_name == "capsicum"
+        assert "shimla mirch" in result.possible_variants
+
+    @pytest.mark.asyncio
+    async def test_normalization_paneer_cubes(self):
+        mock_llm = AsyncMock()
+        mock_llm.call.side_effect = Exception("LLM unavailable")
+        agent = NormalizationAgent(mock_llm)
+        result = await agent.run("paneer cubes")
+        assert result.canonical_name == "paneer"
+        assert result.category == "dairy"
+
+    @pytest.mark.asyncio
+    async def test_normalization_vague_snacks(self):
+        mock_llm = AsyncMock()
+        mock_llm.call.side_effect = Exception("LLM unavailable")
+        agent = NormalizationAgent(mock_llm)
+        result = await agent.run("something for evening snacks")
+        assert result.canonical_name == "snacks"
+        assert len(result.possible_variants) > 0
 
 
 # ---------------------------------------------------------------------------
