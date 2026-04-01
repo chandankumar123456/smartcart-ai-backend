@@ -294,6 +294,8 @@ class PlatformProduct(BaseModel):
     in_stock: bool = True
     image_url: Optional[str] = None
     url: Optional[str] = None
+    brand: Optional[str] = None
+    source: str = "db"
 
 
 class UnifiedProduct(BaseModel):

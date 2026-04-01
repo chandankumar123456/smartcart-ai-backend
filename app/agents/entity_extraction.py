@@ -11,7 +11,7 @@ _KNOWN_PRODUCTS = {
     "pasta", "sugar", "atta", "flour", "salt", "tea", "coffee", "biscuits",
     "chips", "noodles", "cheese", "yogurt", "curd", "chicken", "ghee", "paneer",
     "snacks", "salad", "ginger", "lentils", "cumin seeds", "red chili powder",
-    "wheat flour",
+    "wheat flour", "cucumber", "garlic", "mayonnaise", "mayo",
 }
 _STOPWORDS = {"find", "show", "get", "buy", "need", "want", "for", "me", "the", "a", "an"}
 _DEFAULT_ENTITY_CONFIDENCE = 0.8

@@ -116,6 +116,11 @@ _MOCK_PRODUCTS: Dict[str, List[dict]] = {
         {"platform": Platform.zepto, "product_id": "zp-salad-001", "name": "Fresh Salad Leaves 200g", "normalized_name": "salad", "price": 65.0, "original_price": 70.0, "unit": "200g", "rating": 4.1, "delivery_time_minutes": 10, "discount_percent": 7.1},
         {"platform": Platform.blinkit, "product_id": "bl-salad-001", "name": "Lettuce Iceberg 1pc", "normalized_name": "salad", "price": 58.0, "original_price": 65.0, "unit": "1 pc", "rating": 4.0, "delivery_time_minutes": 12, "discount_percent": 10.8},
     ],
+    "mayonnaise": [
+        {"platform": Platform.blinkit, "product_id": "bl-mayo-001", "name": "Veeba Eggless Mayonnaise 250g", "normalized_name": "mayonnaise", "price": 109.0, "original_price": 119.0, "unit": "250g", "rating": 4.5, "delivery_time_minutes": 12, "discount_percent": 8.4},
+        {"platform": Platform.zepto, "product_id": "zp-mayo-001", "name": "Del Monte Veg Mayonnaise 250g", "normalized_name": "mayonnaise", "price": 104.0, "original_price": 115.0, "unit": "250g", "rating": 4.4, "delivery_time_minutes": 10, "discount_percent": 9.6},
+        {"platform": Platform.bigbasket, "product_id": "bb-mayo-001", "name": "Dr. Oetker FunFoods Mayonnaise 250g", "normalized_name": "mayonnaise", "price": 112.0, "original_price": 122.0, "unit": "250g", "rating": 4.6, "delivery_time_minutes": 30, "discount_percent": 8.2},
+    ],
 }
 
 # Aliases: maps query terms to catalogue keys
@@ -154,6 +159,10 @@ _PRODUCT_ALIASES: Dict[str, str] = {
     "snack": "snacks",
     "salad leaves": "salad",
     "green leaves": "salad",
+    "mayo": "mayonnaise",
+    "mayonnaise": "mayonnaise",
+    "veg mayo": "mayonnaise",
+    "eggless mayo": "mayonnaise",
 }
 
 _QUERY_EXPANSIONS: Dict[str, List[str]] = {
@@ -165,7 +174,10 @@ _QUERY_EXPANSIONS: Dict[str, List[str]] = {
     "snacks": ["chips", "biscuits", "namkeen"],
     "salad": ["salad leaves", "lettuce", "green leaves"],
     "wheat flour": ["atta", "whole wheat atta"],
+    "mayonnaise": ["mayo", "veg mayo", "eggless mayo"],
 }
+
+_BRAND_TOKEN_BLACKLIST = {"fresh", "organic", "premium", "classic", "farm", "red", "green"}
 
 _CATEGORY_TO_ENTITIES: Dict[str, List[str]] = {
     "dairy": ["milk", "curd", "butter", "ghee"],
@@ -211,6 +223,26 @@ def _expand_query_terms(entity: str) -> List[str]:
 
 def _tokenize(text: str) -> List[str]:
     return [t for t in text.lower().replace("-", " ").split() if t]
+
+
+def _extract_brand(name: str) -> Optional[str]:
+    tokens = [t for t in name.replace("-", " ").split() if t]
+    if not tokens:
+        return None
+    for token in tokens[:3]:
+        lower = token.lower()
+        if lower in _BRAND_TOKEN_BLACKLIST:
+            continue
+        return token
+    return tokens[0]
+
+
+def _ensure_product_fields(item: dict) -> dict:
+    enriched = dict(item)
+    name = str(enriched.get("name") or "")
+    enriched["brand"] = enriched.get("brand") or _extract_brand(name)
+    enriched["source"] = str(enriched.get("source") or "db")
+    return enriched
 
 
 def _fallback_from_category(
@@ -296,7 +328,7 @@ def match_products_for_entity(
             raw.append(item)
 
     return (
-        [PlatformProduct(**item) for item in raw],
+        [PlatformProduct(**_ensure_product_fields(item)) for item in raw],
         {
             "input_term": entity,
             "expanded_terms": expanded_terms,

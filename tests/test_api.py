@@ -123,12 +123,33 @@ class TestSearchEndpoint:
         data = response.json()
         assert len(data["results"]) > 0
 
+    def test_search_mayo_synonym_has_results(self, client):
+        payload = self._parse_payload(client, "mayonnaise")
+        response = client.post("/search", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["results"]) > 0
+
     def test_search_paneer_cubes_has_results(self, client):
         payload = self._parse_payload(client, "paneer cubes")
         response = client.post("/search", json=payload)
         assert response.status_code == 200
         data = response.json()
         assert len(data["results"]) > 0
+
+    def test_search_results_include_required_product_fields(self, client):
+        payload = self._parse_payload(client, "milk")
+        response = client.post("/search", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["results"]) > 0
+        row = data["results"][0]
+        assert "name" in row
+        assert "brand" in row
+        assert "platform" in row
+        assert "price" in row
+        assert "source" in row
+        assert row.get("link_status") in {"available", "link unavailable"}
 
     def test_search_evening_snacks_has_results(self, client):
         payload = self._parse_payload(client, "something for evening snacks")
