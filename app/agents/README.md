@@ -1,110 +1,347 @@
-# SmartCart Agent System Documentation
+# agents layer technical documentation
 
-## 1. System Design
+## full pipeline used by parse-query
 
-Agents operate in a strict DB-first architecture:
+`AgentPipeline.parse_query` in `app/orchestrator/pipeline.py` is the authoritative sequence.
 
-```text
-Scraper → Cleaning → Database → Agent Pipeline → Ranking → Result + Redirection
-```
+ordered stages:
+1. `LanguageProcessingAgent.run(query) -> CleanQuery`
+2. `IntentDetectionAgent.run(clean_query) -> IntentResult`
+3. `EntityExtractionAgent.run(clean_query, intent_result) -> RawEntities`
+4. `NormalizationAgent.run_entities(raw_entities) -> NormalizedEntities`
+5. `ConstraintExtractionAgent.run(clean_query) -> Constraints`
+6. `DomainGuardAgent.run(clean_query, intent_result) -> DomainGuardResult`
+7. `AmbiguityReasoningAgent.run(intent_result, raw_entities, normalized_entities) -> AmbiguityDecision`
+8. `FallbackAgent.run(normalized_entities, intent) -> FallbackDecision`
+9. `UserContextAgent.run(clean_query) -> UserContext`
+10. `ExecutionPlannerAgent.run(...) -> (ExecutionPlan, ExecutionGraph, CandidateExecutionPath[])`
+11. `ConstraintOptimizerAgent.derive_weights(...) -> ranking weights`
+12. `OutputFormatterAgent.run(...) -> FinalStructuredQuery`
 
-Agents never fabricate product prices/links. They reason over structured data and constraints.
+the pipeline also logs each stage through `QueryLoggingAgent.run(stage, payload)` and updates learning signals with `LearningLoop`.
 
-## 2. Core Agent Flow
+## finalstructuredquery contract
 
-Primary orchestrated sequence:
+`FinalStructuredQuery` is defined in `app/data/models.py` and is the required execution contract for `/search` and `/execute`.
 
-1. Language processing
-2. Intent detection
-3. Entity extraction
-4. Normalization
-5. Constraint extraction
-6. Domain guard
-7. Ambiguity reasoning
-8. Execution planning
-9. Product matching (DB-first)
-10. Ranking
-11. Deal detection
-12. Evaluation/retry
+top-level fields:
+- parsing and intent: `clean_query`, `intent_result`
+- extraction and normalization: `raw_entities`, `normalized_entities`
+- control and policy: `constraints`, `domain_guard`, `ambiguity`, `fallback`
+- planning: `execution_plan`, `execution_graph`, `candidate_paths`
+- personalization and learning: `user_context`, `learning_signals`, `evaluation_history`, `failure_policies`
+- runtime metadata: `platform_signals`, `coordination_trace`
+- execution payload: `structured_query`
 
-## 3. Query Understanding
+execution depends on this object because `run_search` reads all control decisions from it (domain guard, plan nodes, constraints, candidate paths) and does not reconstruct intent from raw text.
 
-- Parses user text into `FinalStructuredQuery`
-- Supports simple, budget, synonym, exploratory, recipe, and cart intents
-- Structured execution contract prevents raw-query leakage into execution stage
+## each agent responsibility
 
-## 4. Normalization
+### language processing agent
 
-- Canonical mapping with synonym memory
-- Includes stable mappings (e.g., `mayo` → `mayonnaise`)
-- Outputs candidate variants for matching
+file: `app/agents/language_processing.py`
 
-## 5. Ambiguity Handling
+input:
+- raw query string
 
-Ambiguity is triggered only when appropriate:
-- multiple possible entities
-- low confidence
-- conflicting interpretation flags
+output:
+- `CleanQuery` with:
+  - original stripped text
+  - language (`en`)
+  - cleaned tokens
+  - normalized text
 
-Single high-confidence entities skip ambiguity branching.
+transformations:
+- unicode normalization (nfkc)
+- lowercase
+- punctuation cleanup by regex
+- stop/noise token removal
 
-## 6. Product Matching
+### intent detection agent
 
-- DB-first matching through `app/data/layer.py`
-- Optional API fallback if DB miss
-- fallback records are persisted back to DB
-- each product retains `source` marker (`db`/`api`)
+file: `app/agents/intent_detection.py`
 
-## 7. Ranking Logic
+input:
+- `CleanQuery`
 
-Default weighted score:
-- price 40%
-- delivery 30%
-- rating 20%
-- discount 10%
+output:
+- `IntentResult(intent, confidence, notes, secondary_intents)`
 
-Price is primary. Cheapest valid option can be highlighted.
+logic:
+- keyword heuristics for recipe/cart/exploratory/unsupported/default search
+- multi-intent branch for recipe + cart optimization
 
-## 8. Evaluation
+### entity extraction agent
 
-- validates execution quality
-- drives bounded retries
-- avoids misclassifying valid single-entity unavailable outcomes as ambiguity failures
+file: `app/agents/entity_extraction.py`
 
-## 9. Cart Optimization
+input:
+- `CleanQuery`, `IntentResult`
 
-- computes best item options and grouped platform totals
-- exposes total optimized cost and savings
-- supports cross-platform optimization objective
+output:
+- `RawEntities`
 
-## 10. Recipe to Product Mapping
+logic:
+- picks known grocery term from normalized text
+- exploratory intent defaults to `snacks`
+- supports candidate extraction when query contains `and`
+- emits ambiguity flags like `low_confidence_entity`/`missing_entity`
 
-- recipe/ingredient extraction
-- per-ingredient normalization
-- DB product match by ingredient
-- platform-wise options and cheapest mapped item
+### normalization agent
 
-## 11. Data Integrity Rules in Agents
+file: `app/agents/normalization.py`
 
-- No synthetic links
-- No fabricated prices or availability
-- DB as source of truth for normal flow
-- If link missing, response layer marks `link unavailable`
+input:
+- single term (`run`) or `RawEntities` (`run_entities`)
 
-## 12. Reliability
+output:
+- `NormalizedItem` or `NormalizedEntities`
 
-- Works with Redis unavailable (cache no-op)
-- Handles external fallback retries/backoff
-- Maintains robust behavior under partial dependency failures
+logic:
+- llm-first normalization with schema-constrained output
+- deterministic fallback maps on llm failure
+- synonym memory lookup/remember cycle (`SynonymMemoryAgent`)
+- canonical mapping includes explicit mayo -> mayonnaise handling
+- unresolved entities identified by confidence threshold
 
-## 13. Limitations
+### constraint extraction agent
 
-- quality/freshness depends on scraper schedule and source site stability
-- recipe ingredient coverage depends on DB catalog breadth
+file: `app/agents/constraint_extraction.py`
 
-## 14. How to Run and Validate
+input:
+- `CleanQuery`
+
+output:
+- `Constraints`
+
+logic:
+- regex extraction for budget and servings
+- preference keyword extraction (cheap, organic, healthy, premium, fresh)
+- ranking weight bootstrap
+- conflicting preference notes
+- inferred quantity multiplier from servings
+
+### domain guard agent
+
+file: `app/agents/domain_guard.py`
+
+input:
+- `CleanQuery`, `IntentResult`
+
+output:
+- `DomainGuardResult`
+
+logic:
+- blocks unsupported intent and empty normalized queries
+- otherwise allows execution
+
+### ambiguity reasoning agent
+
+file: `app/agents/ambiguity_reasoning.py`
+
+input:
+- `IntentResult`, `RawEntities`, `NormalizedEntities`
+
+output:
+- `AmbiguityDecision`
+
+logic:
+- computes `single_clear_entity` with confidence and flag checks
+- skips ambiguity for single high-confidence entity path
+- enables delayed resolution/candidate enumeration/backoff strategies when needed
+
+### fallback agent
+
+file: `app/agents/fallback.py`
+
+input:
+- `NormalizedEntities`, `QueryIntent`
+
+output:
+- `FallbackDecision`
+
+logic:
+- exploratory intent -> exploratory fallback alternatives
+- unresolved entities -> ambiguity fallback alternatives
+- otherwise no fallback
+
+### user context agent
+
+file: `app/agents/user_context.py`
+
+input:
+- `CleanQuery`
+
+output:
+- `UserContext`
+
+logic:
+- reads/writes profile from shared memory
+- derives preferences, dietary patterns, budget habits
+- updates long-term preference and consumption counters
+- computes predicted needs when absent
+
+### execution planner agent
+
+file: `app/agents/execution_planner.py`
+
+input:
+- `IntentResult`, `Constraints`, `UserContext`, `candidate_entities`
+
+output:
+- `ExecutionPlan`, `ExecutionGraph`, candidate path list
+
+logic:
+- initializes baseline operations: matching -> ranking -> deals
+- adaptive flags can remove deals/ranking nodes
+- appends recipe/cart nodes by primary intent/secondary intents
+- generates up to three candidate execution paths with descending confidence
+
+### constraint optimizer agent
+
+file: `app/agents/constraint_optimizer.py`
+
+input:
+- base weights, query preferences, user preferences
+
+output:
+- normalized ranking weights
+
+logic:
+- boosts price for cheap/budget
+- boosts rating for premium
+- boosts delivery for fresh
+- normalizes sum to 1.0
+- provides candidate scoring for budget optimization decisions
+
+### product matching agent
+
+file: `app/agents/product_matching.py`
+
+input:
+- `StructuredQuery`, optional `NormalizedItem`
+
+output:
+- `UnifiedProduct`
+
+logic:
+- calls data layer `match_products_for_entity`
+- applies max/min price and brand filters
+- if filters remove all but raw match exists, relaxes to top-k cheapest fallback
+
+### ranking agent
+
+file: `app/agents/ranking.py`
+
+input:
+- `UnifiedProduct`, optional ranking preferences
+
+output:
+- `RankingResult`
+
+logic:
+- computes weighted composite score from price/delivery/rating/discount
+- supports price-first sorting when price preference threshold is met
+
+### deal detection agent
+
+file: `app/agents/deal_detection.py`
+
+input:
+- `UnifiedProduct`
+
+output:
+- `DealResult`
+
+logic:
+- marks discount deals at >= 5%
+- marks trending deals at >= 10%
+
+### evaluation agent
+
+file: `app/agents/evaluation.py`
+
+input:
+- `FinalStructuredQuery`, `FinalResponse`
+
+output:
+- `EvaluationResult`
+
+logic:
+- emits failure signals for ambiguity/quality/constraint issues
+- computes quality score with penalties/bonuses
+- sets retry flag based on failure signal presence
+- special case: single clear entity with empty results adds correction note without forced ambiguity retry
+
+### output formatter agent
+
+file: `app/agents/output_formatter.py`
+
+input:
+- all stage outputs
+
+output:
+- `FinalStructuredQuery`
+
+logic:
+- deterministic assembly only; no additional inference
+
+## execution planner and branching in run_search
+
+`AgentPipeline.run_search` uses planner artifacts as follows:
+- candidate entities are built from `candidate_paths` and normalized primary entity
+- each candidate path runs normalization -> product matching -> ranking -> deals -> response -> evaluation
+- best path selected by maximum evaluation quality score
+- retries are bounded by `_MAX_REASONING_RETRY_ATTEMPTS` (`3`)
+- failure signals can expand candidate list or reweight constraints for subsequent retries
+- selected path is recorded in `candidate_paths` and learning notes
+
+## evaluation and retry conditions
+
+retry loop triggers only when `EvaluationResult.should_retry` is true.
+
+examples of retry signals in code:
+- `ambiguity_failure`
+- `poor_match_quality`
+- `constraint_violation`
+- `constraint_conflict`
+
+policy application:
+- on final non-success, matching `FailurePolicy` entries are marked `applied=True`
+
+## ambiguity handling behavior
+
+ambiguity is triggered when not single-clear and any of:
+- exploratory intent
+- multiple candidates
+- ambiguity flags from extraction
+- normalized confidence below threshold
+
+ambiguity is skipped when single clear entity conditions are met:
+- <= 1 candidate
+- exactly one normalized entity
+- confidence >= 0.85
+- no ambiguity flags
+- intent not exploratory
+
+## normalization system details
+
+normalization is llm-first but deterministic-safe:
+- prompt+schema guides canonical output
+- failures use explicit fallback maps
+- synonym memory persists mappings and alias expansion
+- `run_entities` returns canonical entities, variants, and unresolved list
+
+this output directly controls data-layer lookup terms and candidate path generation.
+
+## recipe and cart usage of normalization
+
+normalization agent is reused outside parse-query:
+- recipe ingredient mapping normalizes each ingredient before lookup
+- cart optimization normalizes each item before platform comparison
+
+## test command
 
 ```bash
-pip install -r requirements.txt
 python -m pytest -q tests/test_agents.py tests/test_pipeline.py
 ```
