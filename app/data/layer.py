@@ -234,7 +234,7 @@ def _extract_brand(name: str) -> Optional[str]:
         if lower in _BRAND_TOKEN_BLACKLIST:
             continue
         return token
-    return tokens[0]
+    return None
 
 
 def _ensure_product_fields(item: dict) -> dict:

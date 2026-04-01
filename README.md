@@ -40,6 +40,17 @@ Production-oriented flow:
 User → CDN → Load Balancer → FastAPI Backend → AI System → Database/Cache
 ```
 
+### Strict system pipeline (database-first)
+
+```text
+Scrapers → Data Cleaning → Structured Database → AI Agents → Ranking → Results → Store Redirection
+```
+
+- **Primary source of truth:** structured database (represented by `app/data/layer.py` in local/demo mode)
+- **Background refresh:** scraper + queue pipeline updates database snapshots outside request path
+- **External APIs:** optional fallback/enrichment only (never the primary search path)
+- **Execution rule:** if product exists in DB, DB data is used; if absent, result is returned as unavailable
+
 ---
 
 ## 3) Core Components
@@ -161,6 +172,8 @@ Current platform model supports:
 - JioMart
 - DMart
 
+For comparison-first responses, Blinkit, Zepto, and BigBasket are always considered when matched products exist.
+
 ---
 
 ## 6) API Reference
@@ -178,6 +191,15 @@ Request:
 
 ### `POST /search`
 Execution-layer endpoint. Accepts **FinalStructuredQuery only** and executes matching/ranking/deals from structured intelligence.
+
+Each product result includes:
+- `name`
+- `brand`
+- `price`
+- `platform`
+- `delivery_time_minutes` (if available)
+- `url` + `link_status` (`available` or `link unavailable`)
+- `source` (`db` or `api`)
 
 ### `POST /execute`
 Strict execution alias for `/search` with the same `FinalStructuredQuery`-only contract.
@@ -257,6 +279,41 @@ All intelligence stages use explicit machine-consumable schemas from `app/data/m
 - `FinalStructuredQuery`: all intelligence outputs + `StructuredQuery`.
 
 `/parse-query` returns `FinalStructuredQuery` directly.
+
+---
+
+## 8) Query handling coverage
+
+The pipeline supports:
+- simple product queries (`milk`, `garlic`)
+- budget constrained queries (`cheap milk under 31`)
+- synonym normalization (`mayo` ⇄ `mayonnaise`, `dahi` ⇄ `curd`)
+- ambiguous/exploratory queries (`something for salad`)
+- complex intents (multi-item, recipe, recipe+cart optimization)
+
+Ambiguity is triggered only when:
+- multiple candidates exist, or
+- confidence is low (`< 0.75`), or
+- conflicting interpretation flags are present.
+
+Single high-confidence entities bypass ambiguity branching.
+
+---
+
+## 9) Reliability behavior
+
+- **Redis optional:** service runs normally when Redis is unavailable (cache operations become no-op).
+- **Rate limiting:** API layer enforces `429` with configurable sliding window limits.
+- **Retry/evaluation loop:** execution uses evaluation-guided retries and quality scoring for candidate paths.
+- **Call minimization:** normalization deduplicates candidate terms and reuses synonym memory to avoid repeated LLM calls.
+
+---
+
+## 10) Current limitations
+
+- Result freshness depends on scraper/database refresh cadence.
+- Store links may be unavailable for some products when upstream structured data does not include a valid URL.
+- Local repository demo uses mock structured catalog data to simulate DB-backed behavior.
 
 ---
 

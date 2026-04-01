@@ -14,6 +14,14 @@ Natural Language Query → Structured Intent → Product Intelligence → Decisi
 
 This system is implemented as a **multi-agent pipeline** (not a single monolithic model).
 
+Strict upstream/downstream architecture:
+
+```text
+Scrapers → Data Cleaning → Structured Database → AI Agents → Ranking → Results → Store Redirection
+```
+
+Agents operate on structured data contracts and DB-backed product records. Live external APIs are optional fallback/enrichment layers only.
+
 ---
 
 ## 2) Agent Design Principles
@@ -60,6 +68,7 @@ This system is implemented as a **multi-agent pipeline** (not a single monolithi
 ### Responsibility
 - Retrieve and normalize same entity across platforms
 - Apply structured filters (price range, brand)
+- Preserve DB-first provenance and avoid fabricating inventory, prices, or links
 
 ### Input
 - `StructuredQuery`
@@ -88,6 +97,8 @@ This system is implemented as a **multi-agent pipeline** (not a single monolithi
 - Delivery time: 30%
 - Rating: 20%
 - Discount: 10%
+
+Price remains primary and the output supports cheapest-option highlighting across platforms.
 
 ---
 
@@ -124,6 +135,8 @@ This system is implemented as a **multi-agent pipeline** (not a single monolithi
 4. Estimate total cost
 5. Report missing ingredients when no product mapping exists
 
+Recipe mapping uses normalized structured ingredient entities and platform-wise product options.
+
 ### Input
 - Recipe query text (+ servings)
 
@@ -155,6 +168,7 @@ This system is implemented as a **multi-agent pipeline** (not a single monolithi
 ### Responsibility
 - Validate execution quality and emit retry/refinement signals.
 - Detect ambiguity failures, budget violations, and constraint conflicts.
+- Avoid penalizing valid single high-confidence entity queries as ambiguity failures.
 
 ### Input
 - `FinalStructuredQuery`
@@ -177,7 +191,7 @@ QueryUnderstandingAgent
   → RankingAgent
   → DealDetectionAgent
   → EvaluationAgent
-      ↳ if fail: refine and retry once
+      ↳ if fail: refine and retry (bounded attempts)
 ```
 
 Recipe branch:
@@ -214,6 +228,8 @@ The AI logic layer includes foundational support for:
 - Price alert job hooks (queue handlers)
 - Budget/cart optimization through split-order strategy
 - Recipe-to-grocery conversion
+- Synonym memory and normalization for stable canonical mapping (e.g., mayo ↔ mayonnaise)
+- Ambiguity gating for low-confidence/multi-candidate queries only
 
 ---
 
@@ -243,6 +259,7 @@ The current suite validates:
 - ranking correctness
 - deal detection thresholds
 - recipe mapping and cost estimation
+- normalization consistency and ambiguity handling for single-entity queries
 
 
 ## 3.8 ConstraintOptimizerAgent

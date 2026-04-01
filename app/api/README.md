@@ -20,6 +20,11 @@ It is responsible for:
 - secure access and rate limiting
 - consistent JSON responses and error handling
 
+Architecture contract:
+- Request-time search is **database-first** through the structured data layer.
+- Scrapers/cleaners/queue refresh data in background.
+- External APIs are fallback/enrichment only.
+
 ---
 
 ## 2) API Module Structure
@@ -65,6 +70,13 @@ Primary execution endpoint for structured intelligence.
 5. Evaluation-governed selection/retry loop
 6. Cache write-through
 7. Return `FinalResponse`
+
+Result payload fields include:
+- name, brand, price
+- platform/store
+- delivery estimate (if available)
+- store redirection URL or explicit `link unavailable` status
+- source marker (`db` / `api`)
 
 ---
 
@@ -138,6 +150,7 @@ Defined in `app/core/security.py`.
 ### Rate limiting
 - Sliding window in-memory limiter
 - Proxy-aware client IP extraction using `X-Forwarded-For` fallback to client host
+- Returns HTTP `429` on overflow (client should retry with backoff)
 
 ---
 
@@ -159,6 +172,7 @@ Defined in `app/cache/redis_cache.py`.
 - Deterministic hashed cache keys
 - Search and recipe endpoints are cache-enabled
 - Graceful fallback when Redis is unavailable
+- Core API behavior must remain correct with cache disabled
 
 ---
 
@@ -190,6 +204,8 @@ All routes return `FinalResponse` from `app/data/models.py`:
 ```
 
 Current implementation includes additional `metadata`.
+
+Product result records include `brand`, `source`, and `link_status` to support transparent DB/API provenance and redirect availability.
 
 ---
 
@@ -246,6 +262,8 @@ These tests validate request validation, response shape, and route outcomes.
 
 `/search` and `/execute` consume only `FinalStructuredQuery`.
 The contract includes `execution_graph`, `candidate_paths`, `learning_signals`, `evaluation_history`, and `failure_policies`, enabling adaptive execution without raw query leakage to execution agents.
+
+Ambiguity handling is intentionally conservative: single high-confidence entities do not trigger unnecessary ambiguity resolution.
 
 
 ## Platform event intelligence endpoint
