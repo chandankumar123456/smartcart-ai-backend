@@ -1,201 +1,271 @@
-# api layer technical documentation
+# API Layer Technical Documentation
 
-## endpoint inventory
+This document describes the implemented API layer in `app/api`, including route contracts, validation/security rules, cache behavior, and execution flow.
 
-routes are mounted in `app/main.py` by including `search`, `recipe`, `cart`, and `events` routers.
+---
 
-implemented endpoints:
-- `POST /parse-query`
-- `POST /search`
-- `POST /execute`
-- `POST /recipe`
-- `POST /cart-optimization`
-- `POST /platform-events`
+## 1) API architecture
+
+`app/main.py` mounts routers from:
+- `app/api/routes/search.py`
+- `app/api/routes/recipe.py`
+- `app/api/routes/cart.py`
+- `app/api/routes/events.py`
+
+All routes are mounted at root-level paths.
+
+```mermaid
+flowchart LR
+    Client --> Route[FastAPI Route Handler]
+    Route --> Auth[verify_api_key]
+    Auth --> Rate[check_rate_limit]
+    Rate --> Validation[Pydantic request validation]
+    Validation --> Pipeline[AgentPipeline entrypoint]
+    Pipeline --> Builder[ResponseBuilder]
+    Builder --> Response[FinalResponse or dict]
+```
+
+---
+
+## 2) Endpoint inventory
+
+### Search routes (`app/api/routes/search.py`)
+- `POST /parse-query` -> `FinalStructuredQuery`
+- `POST /search` -> `FinalResponse`
+- `POST /execute` -> `FinalResponse` (alias to `/search` behavior)
+
+### Recipe route (`app/api/routes/recipe.py`)
+- `POST /recipe` -> `FinalResponse`
+
+### Cart route (`app/api/routes/cart.py`)
+- `POST /cart-optimization` -> `FinalResponse`
+
+### Events route (`app/api/routes/events.py`)
+- `POST /platform-events` -> `dict`
+
+### System/UI routes (`app/main.py`)
 - `GET /health`
 - `GET /`
-- `GET /ui` and static `/ui-assets/*`
+- `GET /ui`
+- `GET /ui-assets/*`
 
-## endpoint contracts
+---
 
-### post parse-query
+## 3) Contracts and execution per endpoint
 
-handler: `app/api/routes/search.py::parse_query`
+## `POST /parse-query`
+Handler: `parse_query(body: SearchRequest, request: Request, _api_key=Depends(verify_api_key))`
 
-request model:
-- `SearchRequest`
-  - `query: str` (trimmed, min length 1, max 500)
+### Request model: `SearchRequest`
+- `query: str` (min 1, max 500)
+- whitespace-only queries rejected by validator
 
-response model:
-- `FinalStructuredQuery`
-  - includes `clean_query`, `intent_result`, `raw_entities`, `normalized_entities`, `constraints`, `domain_guard`, `ambiguity`, `fallback`, `execution_plan`, `execution_graph`, `candidate_paths`, `user_context`, `learning_signals`, `evaluation_history`, `failure_policies`, `platform_signals`, `coordination_trace`, `structured_query`
-
-execution:
-- verifies api key
-- checks rate limit
-- calls `pipeline.parse_query(body.query)`
-
-### post search
-
-handler: `app/api/routes/search.py::search`
-
-request model:
+### Response model
 - `FinalStructuredQuery`
 
-response model:
-- `FinalResponse`
-  - `query: str`
-  - `results: list[dict]`
-  - `best_option: dict`
-  - `deals: list[dict]`
-  - `total_price: float`
-  - `metadata: dict`
+### Execution
+1. API key verification
+2. Rate limit check
+3. `pipeline.parse_query(body.query)`
+4. Return strict structured contract
 
-execution:
-- verifies api key
-- checks rate limit
-- computes cache key from `body.structured_query.normalized_query` or `body.clean_query.normalized_text`
-- returns cached response when present
-- otherwise executes `pipeline.run_search(body)`
-- stores result in cache namespace `search`
+---
 
-### post execute
+## `POST /search`
+Handler: `search(body: FinalStructuredQuery, request: Request, _api_key=Depends(verify_api_key))`
 
-handler: `app/api/routes/search.py::execute`
+### Request model
+- `FinalStructuredQuery` only
 
-contract:
-- request: `FinalStructuredQuery`
-- response: `FinalResponse`
-- implementation is direct alias to `search(...)`
-
-### post recipe
-
-handler: `app/api/routes/recipe.py::recipe`
-
-request model:
-- `RecipeRequest`
-  - `query: str` (trimmed)
-  - `servings: int` (`1..20`)
-
-response model:
+### Response model
 - `FinalResponse`
 
-execution:
-- api key + rate limit checks
-- recipe cache lookup by `"{query}|servings={servings}"`
-- on miss calls `pipeline.run_recipe(...)`
+### Execution
+1. API key verification
+2. Rate limit check
+3. Cache key = `body.structured_query.normalized_query` or `body.clean_query.normalized_text`
+4. Cache lookup (`prefix="search"`)
+5. On hit: return cached `FinalResponse`
+6. On miss: `pipeline.run_search(body)`
+7. Cache write and return
 
-### post cart-optimization
+> `/search` does not accept raw natural language text.
 
-handler: `app/api/routes/cart.py::cart_optimize`
+---
 
-request model:
-- `CartOptimizeRequest`
-  - `items: list[CartItem]` (must be non-empty)
-  - item validation deduplicates by lowercased name and strips whitespace
+## `POST /execute`
+Handler: `execute(...)`
 
-response model:
+- Same request/response models as `/search`
+- Internally delegates directly to `search(...)`
+
+---
+
+## `POST /recipe`
+Handler: `recipe(body: RecipeRequest, request: Request, _api_key=Depends(verify_api_key))`
+
+### Request model: `RecipeRequest`
+- `query: str` (trimmed, non-empty)
+- `servings: int` (`1..20`, default `2`)
+
+### Response model
 - `FinalResponse`
 
-execution:
-- api key + rate limit checks
-- calls `pipeline.run_cart_optimize(body.items)`
+### Execution
+1. API key verification
+2. Rate limit check
+3. Cache key = `"{query}|servings={servings}"`
+4. Cache lookup (`prefix="recipe"`)
+5. On miss run `pipeline.run_recipe(...)`
+6. Cache write and return
 
-### post platform-events
+---
 
-handler: `app/api/routes/events.py::ingest_platform_event`
+## `POST /cart-optimization`
+Handler: `cart_optimize(body: CartOptimizeRequest, request: Request, _api_key=Depends(verify_api_key))`
 
-request model:
-- `PlatformEvent`
-  - `event_type: PlatformEventType`
-  - `user_id: str` (default `anonymous`)
-  - `payload: dict`
-  - `timestamp: str`
-  - `source: str` (default `api`)
+### Request model: `CartOptimizeRequest`
+- `items: List[CartItem]` (min length 1)
+- validator trims names and deduplicates by lowercase normalized name
 
-response:
-- plain `dict` returned by `PlatformEventIntelligence.ingest`
+### Response model
+- `FinalResponse`
 
-## execution rules
+### Execution
+1. API key verification
+2. Rate limit check
+3. `pipeline.run_cart_optimize(body.items)`
+4. Return optimization response
 
-- `/search` and `/execute` accept `FinalStructuredQuery` only.
-- raw user text is not accepted by `/search`.
-- correct client sequence is:
-  1. call `/parse-query`
-  2. send returned contract to `/search` or `/execute`
+---
 
-## response structure details
+## `POST /platform-events`
+Handler: `ingest_platform_event(body: PlatformEvent, request: Request, _api_key=Depends(verify_api_key))`
 
-search response rows are constructed in `ResponseBuilder.build_search_response` and include:
-- `platform`
-- `product_id`
-- `name`
-- `brand`
-- `price`
-- `original_price`
-- `discount_percent`
-- `unit`
-- `rating`
-- `delivery_time_minutes`
-- `in_stock`
-- `url`
-- `link_status`
-- `source`
-- `score`
-- `rank`
+### Request model: `PlatformEvent`
+- `event_type: PlatformEventType`
+- `user_id: str = "anonymous"`
+- `payload: dict`
+- `timestamp: str`
+- `source: str = "api"`
 
-link status behavior:
+### Response
+- plain dictionary returned by `PlatformEventIntelligence.ingest`
+
+### Execution
+1. API key verification
+2. Rate limit check
+3. `get_platform_event_intelligence().ingest(body)`
+
+---
+
+## 4) Search API execution flow (strict contract)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as API
+    participant P as AgentPipeline
+    participant R as Redis Cache
+
+    C->>A: POST /parse-query {query}
+    A->>P: parse_query(query)
+    P-->>A: FinalStructuredQuery
+    A-->>C: FinalStructuredQuery
+
+    C->>A: POST /search {FinalStructuredQuery}
+    A->>R: get(search, cache_key)
+    alt cache hit
+      R-->>A: cached response
+      A-->>C: FinalResponse
+    else cache miss
+      A->>P: run_search(FinalStructuredQuery)
+      P-->>A: FinalResponse
+      A->>R: set(search, cache_key, response)
+      A-->>C: FinalResponse
+    end
+```
+
+---
+
+## 5) Response structure and field behavior
+
+Search responses are assembled by `ResponseBuilder.build_search_response`.
+
+Each product row includes:
+- identity/context: `platform`, `product_id`, `name`, `brand`, `unit`
+- pricing: `price`, `original_price`, `discount_percent`
+- quality/logistics: `rating`, `delivery_time_minutes`, `in_stock`
+- linking/provenance: `url`, `link_status`, `source`
+- ranking: `score`, `rank`
+
+`link_status` is derived as:
 - `available` when `url` is truthy
-- `link unavailable` when `url` is null/empty
+- `link unavailable` otherwise
 
-source behavior:
-- forwarded from `PlatformProduct.source`
-- expected values in runtime path are `db`, `api`, or `mock` depending on data-layer path
+`best_option` mirrors key fields from top-ranked item.
 
-## validation and security
+---
 
-api key validation (`verify_api_key`):
-- if `API_KEYS` is empty: open access
-- if configured: missing/invalid key returns 401
-- header name defaults to `X-API-Key` (configurable)
+## 6) Security, validation, and error handling
 
-rate limit (`check_rate_limit`):
-- sliding window in memory by client ip
-- ip extraction prefers `X-Forwarded-For`, falls back to `request.client.host`
-- exceeding limit returns 429
+## API key logic (`app/core/security.py`)
+- If `API_KEYS` is empty: open access mode.
+- If configured: missing/invalid key -> HTTP 401.
+- Header name from `API_KEY_HEADER` (default `X-API-Key`).
 
-request validation:
-- pydantic models enforce required fields and bounds
-- whitespace-only query values are rejected by field validators
+## Rate limit logic
+- In-memory sliding window keyed by client IP.
+- IP extraction precedence: `X-Forwarded-For` first, then `request.client.host`.
+- Limit/window from settings (`RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW_SECONDS`).
+- Exceed -> HTTP 429.
 
-## error handling
+## Request validation
+- Pydantic models enforce required fields and value bounds.
+- Validators reject empty/whitespace-only query values.
 
-global handlers are registered in `app/core/exceptions.py`:
-- `SmartCartException` -> status from exception, structured error body
-- generic `Exception` -> 500 with structured error body
+## Error handlers
+Registered globally in `app/core/exceptions.py`:
+- `SmartCartException` -> structured custom status response
+- generic `Exception` -> structured 500 response
 
-## cache behavior
+---
 
-cache layer is optional:
-- `CacheLayer.connect` tries redis and sets availability flag
-- if redis is unavailable, api continues with cache no-op behavior
-- `/health` reports cache state as `connected` or `unavailable`
+## 7) Cache integration behavior
 
-## operational notes
+Cache implementation: `app/cache/redis_cache.py`.
 
-startup lifecycle (`app/main.py`):
-- initialize db schema (with degraded-mode continuation on failure)
-- connect cache
-- start queue workers
-- start scraper scheduler
+- On startup, API attempts Redis connect.
+- If unavailable, cache is disabled and calls become no-op (service remains functional).
+- Key format: `smartcart:{prefix}:{sha256(query)[:16]}`.
+- `/health` exposes cache state as `connected` or `unavailable`.
 
-shutdown lifecycle:
-- stop scheduler
-- stop queue
-- disconnect cache
-- close db engine
+---
 
-## test command
+## 8) Operational lifecycle coupling
 
+Startup (lifespan):
+1. DB init (degraded-mode continuation on failure)
+2. Cache connect
+3. Job queue start (2 workers)
+4. Scraper scheduler start
+
+Shutdown:
+1. Scraper scheduler stop
+2. Job queue stop
+3. Cache disconnect
+4. DB close
+
+---
+
+## 9) Verification
+
+Targeted API tests:
 ```bash
 python -m pytest -q tests/test_api.py
+```
+
+Repository-wide tests:
+```bash
+python -m pytest -q
 ```
