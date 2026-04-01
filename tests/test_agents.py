@@ -13,6 +13,7 @@ from app.agents.product_matching import ProductMatchingAgent
 from app.agents.query_understanding import QueryUnderstandingAgent, _rule_based_parse
 from app.agents.ranking import RankingAgent
 from app.agents.recipe import RecipeAgent
+from app.data import layer as data_layer
 from app.data.models import (
     AmbiguityDecision,
     CleanQuery,
@@ -259,6 +260,25 @@ class TestProductMatchingAgent:
         )
         result = await agent.run(sq)
         assert len(result.platforms) == 3
+
+    @pytest.mark.asyncio
+    async def test_match_uses_db_source_when_db_returns_rows(self):
+        agent = ProductMatchingAgent()
+        sq = StructuredQuery(product="milk", filters=QueryFilters(), intent=QueryIntent.product_search, raw_query="milk")
+        sample = PlatformProduct(
+            platform=Platform.blinkit,
+            product_id="db-1",
+            name="DB Milk",
+            normalized_name="milk",
+            price=30.0,
+            source="db",
+        )
+        with patch.object(data_layer, "_search_db_products", return_value=[sample]), patch.object(
+            data_layer, "_fetch_api_fallback", return_value=[]
+        ):
+            result = await agent.run(sq)
+        assert len(result.platforms) == 1
+        assert result.platforms[0].source == "db"
 
 
 # ---------------------------------------------------------------------------

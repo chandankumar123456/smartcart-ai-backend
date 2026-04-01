@@ -35,7 +35,17 @@ class Settings(BaseSettings):
     queue_name: str = "smartcart_jobs"
 
     # Data
-    mock_data_enabled: bool = True  # Use mock data when DB/scrapers unavailable
+    mock_data_enabled: bool = True  # Keep true for local tests; set false in production
+    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/smartcart"
+    db_schema_auto_create: bool = True
+    db_echo: bool = False
+    external_product_api_url: str = ""
+    scraper_enabled: bool = True
+    scraper_interval_minutes: int = 180
+    scraper_blinkit_url: str = ""
+    api_fallback_enabled: bool = True
+    api_fallback_max_retries: int = 3
+    api_fallback_backoff_seconds: float = 0.5
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

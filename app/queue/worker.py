@@ -109,9 +109,15 @@ class JobQueue:
 
 
 async def handle_scrape_prices(platform: str, category: str) -> None:
-    """Stub: trigger price scraping for a platform/category."""
+    """Trigger scraper ingestion for a platform/category."""
     logger.info("Scraping prices for %s / %s", platform, category)
-    await asyncio.sleep(0)  # placeholder for real scraper call
+    if platform.lower().strip() == "blinkit":
+        from app.scrapers.blinkit_scraper import run_blinkit_scrape
+
+        inserted = run_blinkit_scrape(category)
+        logger.info("Blinkit scrape upserted %s products", inserted)
+        return
+    await asyncio.sleep(0)
 
 
 async def handle_update_price_history(entity: str) -> None:

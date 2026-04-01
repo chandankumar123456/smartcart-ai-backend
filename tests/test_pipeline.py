@@ -104,6 +104,12 @@ class TestSearchPipeline:
         assert len(result.results) > 0
 
     @pytest.mark.asyncio
+    async def test_search_result_has_link_status_when_url_missing(self, pipeline):
+        result = await self._run_from_query(pipeline, "milk")
+        if result.results:
+            assert result.results[0].get("link_status") in {"available", "link unavailable"}
+
+    @pytest.mark.asyncio
     async def test_search_capsicum_returns_results(self, pipeline):
         result = await self._run_from_query(pipeline, "capsicum")
         assert len(result.results) > 0

@@ -19,6 +19,8 @@ from app.api.routes import cart, events, recipe, search
 from app.cache.redis_cache import get_cache
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
+from app.data.database import close_database, init_database
+from app.jobs.scheduler import get_scraper_scheduler
 from app.queue.worker import get_job_queue
 
 logger = logging.getLogger(__name__)
@@ -35,15 +37,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Startup and shutdown lifecycle hooks."""
     # Startup
     logger.info("Starting %s v%s", settings.app_name, settings.app_version)
+    try:
+        init_database()
+    except Exception as exc:
+        logger.warning("Database initialization failed, continuing in degraded mode: %s", exc)
     cache = get_cache()
     await cache.connect()
     queue = get_job_queue()
     await queue.start(num_workers=2)
+    scheduler = get_scraper_scheduler()
+    await scheduler.start()
     yield
     # Shutdown
     logger.info("Shutting down...")
+    await scheduler.stop()
     await queue.stop()
     await cache.disconnect()
+    close_database()
 
 
 def create_app() -> FastAPI:
