@@ -128,9 +128,44 @@ class AmbiguityDecision(BaseModel):
 
 
 class ExecutionPlan(BaseModel):
-    mode: str = "search_only"
+    mode: str = "graph"
     steps: List[str] = Field(default_factory=list)
     reason: str = ""
+    plan_id: str = ""
+    entry_nodes: List[str] = Field(default_factory=list)
+    terminal_nodes: List[str] = Field(default_factory=list)
+    adaptive_flags: Dict[str, bool] = Field(default_factory=dict)
+
+
+class ExecutionNode(BaseModel):
+    node_id: str
+    operation: str
+    depends_on: List[str] = Field(default_factory=list)
+    condition: str = "always"
+    path_id: str = "primary"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecutionGraph(BaseModel):
+    graph_id: str
+    nodes: List[ExecutionNode] = Field(default_factory=list)
+    edges: List[Dict[str, str]] = Field(default_factory=list)
+
+
+class CandidateExecutionPath(BaseModel):
+    path_id: str
+    entity_candidate: str
+    confidence: float = 0.0
+    status: str = "pending"
+    quality_score: float = 0.0
+    selected: bool = False
+
+
+class FailurePolicy(BaseModel):
+    failure_type: str
+    action: str
+    retries_allowed: int = 0
+    applied: bool = False
 
 
 class UserContext(BaseModel):
@@ -155,6 +190,16 @@ class EvaluationResult(BaseModel):
     should_retry: bool = False
     failure_signals: List[str] = Field(default_factory=list)
     correction_suggestions: List[str] = Field(default_factory=list)
+    quality_score: float = 0.0
+    chosen_path_id: str = ""
+
+
+class EvaluationFrame(BaseModel):
+    iteration: int = 0
+    path_id: str = ""
+    quality_score: float = 0.0
+    failures: List[str] = Field(default_factory=list)
+    corrections: List[str] = Field(default_factory=list)
 
 
 class StructuredQuery(BaseModel):
@@ -189,8 +234,14 @@ class FinalStructuredQuery(BaseModel):
     ambiguity: AmbiguityDecision = Field(default_factory=AmbiguityDecision)
     fallback: FallbackDecision
     execution_plan: ExecutionPlan = Field(default_factory=ExecutionPlan)
+    execution_graph: ExecutionGraph = Field(
+        default_factory=lambda: ExecutionGraph(graph_id="unplanned")
+    )
+    candidate_paths: List[CandidateExecutionPath] = Field(default_factory=list)
     user_context: UserContext = Field(default_factory=UserContext)
     learning_signals: LearningSignals = Field(default_factory=LearningSignals)
+    evaluation_history: List[EvaluationFrame] = Field(default_factory=list)
+    failure_policies: List[FailurePolicy] = Field(default_factory=list)
     structured_query: StructuredQuery
 
 

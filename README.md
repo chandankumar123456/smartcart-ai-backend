@@ -195,6 +195,12 @@ Request:
   "ambiguity": { "...": "..." },
   "fallback": { "...": "..." },
   "execution_plan": { "...": "..." },
+  "execution_graph": { "...": "..." },
+  "candidate_paths": [],
+  "user_context": { "...": "..." },
+  "learning_signals": { "...": "..." },
+  "evaluation_history": [],
+  "failure_policies": [],
   "structured_query": { "...": "..." }
 }
 ```
@@ -263,9 +269,10 @@ All intelligence stages use explicit machine-consumable schemas from `app/data/m
 - `DomainGuardAgent` — grocery-domain safety gating.
 - `FallbackAgent` — ambiguity/exploratory fallback strategy.
 - `AmbiguityReasoningAgent` — delayed-resolution decisioning for ambiguous queries.
-- `ExecutionPlannerAgent` — dynamic route planning for multi-intent execution.
+- `ExecutionPlannerAgent` — graph-based planning for conditional, branching execution.
+- `ConstraintOptimizerAgent` — multi-objective optimization weights and candidate scoring.
 - `UserContextAgent` — derives personalization context for planning/ranking adaptation.
-- `EvaluationAgent` — validates execution quality and drives `plan → execute → evaluate → refine` retries.
+- `EvaluationAgent` — governing decision authority that scores each candidate path and drives iterative re-planning.
 - `OutputFormatterAgent` — final strict structured output assembly.
 - `SynonymMemoryAgent` — remembers raw-term → canonical mappings.
 - `QueryLoggingAgent` — stage-wise structured observability + learning/failure counters.

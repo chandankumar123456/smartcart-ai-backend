@@ -61,9 +61,10 @@ Primary execution endpoint for structured intelligence.
 1. Validate payload (`FinalStructuredQuery`)
 2. Security + rate limit checks
 3. Cache lookup
-4. Run `AgentPipeline.run_search`
-5. Cache write-through
-6. Return `FinalResponse`
+4. Run graph-based execution with candidate path branching
+5. Evaluation-governed selection/retry loop
+6. Cache write-through
+7. Return `FinalResponse`
 
 ---
 
@@ -239,3 +240,9 @@ Relevant test files:
 - `tests/test_pipeline.py` — orchestrator-backed behavior
 
 These tests validate request validation, response shape, and route outcomes.
+
+
+## 14) Structured-only execution guarantees
+
+`/search` and `/execute` consume only `FinalStructuredQuery`.
+The contract includes `execution_graph`, `candidate_paths`, `learning_signals`, `evaluation_history`, and `failure_policies`, enabling adaptive execution without raw query leakage to execution agents.

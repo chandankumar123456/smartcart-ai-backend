@@ -42,10 +42,15 @@ class EvaluationAgent:
             if amount > 0 and price > amount:
                 add_signal("constraint_violation", "enforce_budget_hard_limit")
 
+        quality_score = 1.0
+        quality_score -= min(0.6, len(failures) * 0.2)
+        if response.results:
+            quality_score += min(0.2, len(response.results) * 0.02)
         should_retry = bool(failures)
         return EvaluationResult(
             success=not should_retry,
             should_retry=should_retry,
             failure_signals=failures,
             correction_suggestions=corrections,
+            quality_score=max(0.0, min(1.0, round(quality_score, 4))),
         )

@@ -243,3 +243,29 @@ The current suite validates:
 - ranking correctness
 - deal detection thresholds
 - recipe mapping and cost estimation
+
+
+## 3.8 ConstraintOptimizerAgent
+
+**File:** `constraint_optimizer.py`
+
+### Responsibility
+- Convert constraints + user preferences into adaptive ranking weights.
+- Score candidates with budget/availability tradeoffs for optimization.
+
+### Input
+- Constraint weight map
+- Query preferences and user preferences
+- Candidate product
+
+### Output
+- Optimized weights and objective score
+
+---
+
+## 9) Agent Interaction Pattern
+
+- Planner creates a graph with conditional nodes and branch paths.
+- Ambiguity candidate paths execute independently.
+- Evaluation scores each path and governs whether re-plan is required.
+- Learning loop persists policy updates that influence later planning/ranking behavior.

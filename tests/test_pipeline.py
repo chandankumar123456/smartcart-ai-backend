@@ -124,13 +124,16 @@ class TestSearchPipeline:
         parsed = await pipeline.parse_query("plan tomato pasta and optimize my cart")
         assert parsed.intent_result.intent.value == "recipe"
         assert "cart_optimization" in [i.value for i in parsed.intent_result.secondary_intents]
-        assert parsed.execution_plan.mode == "recipe_then_cart_optimization"
+        assert parsed.execution_plan.mode == "graph"
+        assert parsed.execution_graph.graph_id.startswith("graph-")
+        assert any(node.operation == "recipe_generation" for node in parsed.execution_graph.nodes)
 
     @pytest.mark.asyncio
     async def test_parse_query_ambiguity_has_candidates(self, pipeline):
         parsed = await pipeline.parse_query("need paneer and salad")
         assert parsed.ambiguity.needs_resolution is True
         assert len(parsed.ambiguity.candidate_entities) >= 1
+        assert len(parsed.candidate_paths) >= 1
 
     @pytest.mark.asyncio
     async def test_reasoning_loop_applies_budget_refinement(self, pipeline):
@@ -141,6 +144,22 @@ class TestSearchPipeline:
         else:
             assert result.results == []
         assert parsed.learning_signals.retry_count >= 0
+        assert len(parsed.evaluation_history) >= 1
+
+    @pytest.mark.asyncio
+    async def test_dynamic_execution_can_skip_deals(self, pipeline):
+        parsed = await pipeline.parse_query("cheap rice under 40")
+        assert parsed.execution_plan.adaptive_flags.get("skip_deals") is True
+        result = await pipeline.run_search(parsed)
+        assert result.deals == []
+
+    @pytest.mark.asyncio
+    async def test_learning_policy_affects_future_run(self, pipeline):
+        parsed = await pipeline.parse_query("cheap milk under 20")
+        await pipeline.run_search(parsed)
+        parsed2 = await pipeline.parse_query("cheap milk under 20")
+        await pipeline.run_search(parsed2)
+        assert any(note.startswith("selected_path:") for note in parsed2.learning_signals.evaluation_notes)
 
 
 class TestRecipePipeline:

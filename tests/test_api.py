@@ -135,8 +135,12 @@ class TestSearchEndpoint:
         assert "ambiguity" in data
         assert "fallback" in data
         assert "execution_plan" in data
+        assert "execution_graph" in data
+        assert "candidate_paths" in data
         assert "user_context" in data
         assert "learning_signals" in data
+        assert "evaluation_history" in data
+        assert "failure_policies" in data
         assert "structured_query" in data
 
     def test_execute_endpoint_accepts_final_structured_query(self, client):
