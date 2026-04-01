@@ -356,11 +356,15 @@ class AgentPipeline:
         response.metadata["coordination_trace"] = self._coordination.trace()
         response.metadata["platform_signals"] = final_structured.platform_signals
         budget_limit = (final_structured.constraints.budget or {}).get("amount")
-        if budget_limit and response.best_option:
-            if float(response.best_option.get("price", 0)) > float(budget_limit):
+        if budget_limit:
+            response.results = [r for r in response.results if float(r.get("price", 0)) <= float(budget_limit)]
+            if response.best_option and float(response.best_option.get("price", 0)) > float(budget_limit):
                 response.best_option = {}
-                response.results = [r for r in response.results if float(r.get("price", 0)) <= float(budget_limit)]
-                response.total_price = response.results[0]["price"] if response.results else 0.0
+            if not response.best_option and response.results:
+                response.best_option = response.results[0]
+            response.total_price = response.best_option.get("price", 0.0) if response.best_option else 0.0
+            if not response.results:
+                response.metadata["no_results_message"] = "No products found within budget"
         if best_eval.success:
             await self._learning_loop.learn_from_success(final_structured)
         else:
@@ -475,7 +479,7 @@ class AgentPipeline:
             if item.product and item.product.price <= float(budget_limit)
         ]
         ranked = []
-        source_ranked = hard_budget_ranked or ranking_result.ranked_list
+        source_ranked = hard_budget_ranked
         source_ranked_keys = {(item.product.platform.value, item.product.product_id) for item in source_ranked}
         for item in ranking_result.ranked_list:
             item_key = (item.product.platform.value, item.product.product_id)

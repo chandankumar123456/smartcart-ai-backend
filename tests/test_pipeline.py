@@ -41,12 +41,25 @@ class TestSearchPipeline:
         assert "normalized_query" in result.metadata
         assert "items" in result.metadata
         assert "constraints" in result.metadata
+        if result.results:
+            assert "url" in result.results[0]
+            assert "redirect_url" in result.results[0]
+        if result.best_option:
+            assert "url" in result.best_option
+            assert "redirect_url" in result.best_option
 
     @pytest.mark.asyncio
     async def test_search_with_price_filter(self, pipeline):
         result = await self._run_from_query(pipeline, "milk under 30")
         for r in result.results:
             assert r["price"] <= 30.0
+
+    @pytest.mark.asyncio
+    async def test_search_budget_is_strict_when_no_matches(self, pipeline):
+        result = await self._run_from_query(pipeline, "ghee under 10")
+        assert result.results == []
+        assert result.best_option == {}
+        assert result.metadata.get("no_results_message") == "No products found within budget"
 
     @pytest.mark.asyncio
     async def test_search_best_option_present(self, pipeline):
@@ -152,6 +165,14 @@ class TestSearchPipeline:
         assert parsed.execution_plan.adaptive_flags.get("skip_deals") is True
         result = await pipeline.run_search(parsed)
         assert result.deals == []
+
+    @pytest.mark.asyncio
+    async def test_cheap_query_orders_results_cheapest_first(self, pipeline):
+        result = await self._run_from_query(pipeline, "cheap wheat flour under 150")
+        prices = [r["price"] for r in result.results]
+        assert prices == sorted(prices)
+        if prices:
+            assert prices[0] <= 150
 
     @pytest.mark.asyncio
     async def test_learning_policy_affects_future_run(self, pipeline):

@@ -107,7 +107,18 @@ class RankingAgent:
             for p in products
             if p.in_stock
         ]
-        scored.sort(key=lambda x: x[1], reverse=True)
+        price_first = bool(ranking_preferences and float(ranking_preferences.get("price", 0.0)) >= 0.6)
+        if price_first:
+            scored.sort(
+                key=lambda x: (
+                    x[0].price,
+                    x[0].delivery_time_minutes if x[0].delivery_time_minutes is not None else float("inf"),
+                    -(x[0].rating if x[0].rating is not None else 0.0),
+                    -(x[0].discount_percent if x[0].discount_percent is not None else 0.0),
+                )
+            )
+        else:
+            scored.sort(key=lambda x: x[1], reverse=True)
 
         ranked_list = [
             RankedProduct(
