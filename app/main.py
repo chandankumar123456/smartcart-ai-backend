@@ -6,11 +6,14 @@ Architecture:
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import cart, events, recipe, search
 from app.cache.redis_cache import get_cache
@@ -44,6 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 def create_app() -> FastAPI:
+    frontend_dir = Path(__file__).resolve().parent / "frontend"
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
@@ -79,6 +83,10 @@ def create_app() -> FastAPI:
     app.include_router(recipe.router, tags=["AI Recipe"])
     app.include_router(cart.router, tags=["AI Cart"])
     app.include_router(events.router, tags=["Platform Intelligence"])
+    if frontend_dir.exists():
+        app.mount("/ui-assets", StaticFiles(directory=frontend_dir), name="ui-assets")
+    else:
+        logger.warning("Frontend directory missing at %s; /ui assets disabled", frontend_dir)
 
     # ------------------------------------------------------------------
     # Health check
@@ -97,9 +105,25 @@ def create_app() -> FastAPI:
         return {
             "name": settings.app_name,
             "version": settings.app_version,
-            "endpoints": ["/parse-query", "/search", "/recipe", "/cart-optimization", "/platform-events"],
+            "endpoints": [
+                "/parse-query",
+                "/search",
+                "/recipe",
+                "/cart-optimization",
+                "/platform-events",
+                "/ui",
+            ],
             "docs": "/docs",
         }
+
+    @app.get("/ui", include_in_schema=False)
+    async def ui() -> FileResponse:
+        if not frontend_dir.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="UI assets are not available",
+            )
+        return FileResponse(frontend_dir / "index.html")
 
     return app
 

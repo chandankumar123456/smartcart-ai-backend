@@ -37,6 +37,21 @@ class TestHealthEndpoints:
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
 
+    def test_ui_page_served(self, client):
+        response = client.get("/ui")
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+
+    def test_ui_assets_served(self, client):
+        response = client.get("/ui-assets/app.js")
+        assert response.status_code == 200
+        assert "javascript" in response.headers["content-type"]
+
+    def test_ui_styles_served(self, client):
+        response = client.get("/ui-assets/styles.css")
+        assert response.status_code == 200
+        assert "text/css" in response.headers["content-type"]
+
 
 class TestSearchEndpoint:
     def _parse_payload(self, client, query: str):
