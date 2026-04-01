@@ -16,7 +16,7 @@ This backend implements:
 
 Out of scope for this repository:
 
-- Frontend applications
+- Production frontend applications (a lightweight validation UI is available at `/ui`)
 - Non-AI backend features outside orchestration/data access
 
 ---
@@ -235,6 +235,7 @@ Request:
 
 - `GET /` → basic service info + endpoint list
 - `GET /health` → app status and cache status
+- `GET /ui` → lightweight comparison interface for end-to-end workflow validation
 
 ---
 

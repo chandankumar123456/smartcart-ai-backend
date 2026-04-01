@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SmartCart Grocery Intelligence</title>
+  <link rel="stylesheet" href="/ui-assets/styles.css" />
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <h1>SmartCart Grocery Intelligence</h1>
+      <p class="subtitle">Compare groceries across platforms and choose confidently.</p>
+      <form id="search-form" class="search-wrap" aria-label="Grocery intelligence search">
+        <input
+          id="query-input"
+          class="search-input"
+          type="text"
+          name="query"
+          placeholder='Try "cheap wheat flour under 150" or "best rice for biryani"'
+          autocomplete="off"
+          required
+        />
+        <button id="search-btn" class="search-btn" type="submit">Search</button>
+      </form>
+    </section>
+
+    <section id="loading-skeleton" class="skeleton hidden" aria-live="polite">
+      <div class="skeleton-line"></div>
+      <div class="skeleton-line"></div>
+      <div class="skeleton-line"></div>
+    </section>
+
+    <section id="no-results" class="empty-state hidden" aria-live="polite">
+      <h2>No products found within budget</h2>
+      <p>Try widening your budget, product keywords, or preferences.</p>
+    </section>
+
+    <section id="results-section" class="results hidden" aria-live="polite">
+      <div class="section-title-row">
+        <h2>Comparison Results</h2>
+      </div>
+      <div id="results-grid" class="results-grid"></div>
+    </section>
+
+    <section id="deals-section" class="deals hidden" aria-live="polite">
+      <h2>Top Deals</h2>
+      <div id="deals-list" class="deals-list"></div>
+    </section>
+
+    <details id="debug-panel" class="debug-panel hidden">
+      <summary>Query Insight</summary>
+      <div class="debug-body">
+        <p><strong>Interpreted query:</strong> <span id="debug-query">-</span></p>
+        <p><strong>Detected intent:</strong> <span id="debug-intent">-</span></p>
+        <p><strong>Constraints:</strong> <span id="debug-constraints">-</span></p>
+      </div>
+    </details>
+  </main>
+
+  <script src="/ui-assets/app.js"></script>
+</body>
+</html>
