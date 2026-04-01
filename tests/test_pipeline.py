@@ -43,10 +43,8 @@ class TestSearchPipeline:
         assert "constraints" in result.metadata
         if result.results:
             assert "url" in result.results[0]
-            assert "redirect_url" in result.results[0]
         if result.best_option:
             assert "url" in result.best_option
-            assert "redirect_url" in result.best_option
 
     @pytest.mark.asyncio
     async def test_search_with_price_filter(self, pipeline):

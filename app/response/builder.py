@@ -86,7 +86,6 @@ class ResponseBuilder:
                     "delivery_time_minutes": ranked.product.delivery_time_minutes,
                     "in_stock": ranked.product.in_stock,
                     "url": ranked.product.url,
-                    "redirect_url": ranked.product.url,
                     "score": ranked.score,
                     "rank": ranked.rank,
                 })
@@ -104,7 +103,6 @@ class ResponseBuilder:
                 "rating": bo.product.rating,
                 "discount_percent": bo.product.discount_percent,
                 "url": bo.product.url,
-                "redirect_url": bo.product.url,
                 "score": bo.score,
             }
 

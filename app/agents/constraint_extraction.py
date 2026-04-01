@@ -9,7 +9,7 @@ from app.data.models import CleanQuery, Constraints
 
 _PRICE_PATTERN = re.compile(r"(?:under|below|less than|<|max|upto)\s*(?:rs\.?|₹)?\s*(\d+(?:\.\d+)?)", re.I)
 _SERVINGS_PATTERN = re.compile(r"(?:for|serves?)\s*(\d+)\s*(?:people|persons|servings?)?", re.I)
-_LOW_PRICE_PATTERN = re.compile(r"\blow(?:est)?\s+price\b", re.I)
+_LOW_PRICE_PATTERN = re.compile(r"\blow(?:est)?[\s-]?price\b", re.I)
 _PREFERENCE_KEYWORDS = {
     "cheap": "cheap",
     "budget": "cheap",

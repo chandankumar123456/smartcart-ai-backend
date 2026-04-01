@@ -255,7 +255,7 @@ class TestRankingAgent:
         assert ranks == [1, 2, 3]
 
     @pytest.mark.asyncio
-    async def test_price_first_ranking_when_budget_intent(self):
+    async def test_price_first_ranking_with_high_price_preference(self):
         agent = RankingAgent()
         products = [
             self._make_product(Platform.blinkit, 32.0, 8, 4.8, 20.0),
