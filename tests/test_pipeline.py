@@ -138,6 +138,8 @@ class TestSearchPipeline:
         result = await pipeline.run_search(parsed)
         if result.best_option:
             assert result.best_option["price"] <= 20
+        else:
+            assert result.results == []
         assert parsed.learning_signals.retry_count >= 0
 
 

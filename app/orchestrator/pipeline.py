@@ -59,7 +59,7 @@ from app.llm.manager import LLMManager, get_llm_manager
 from app.response.builder import ResponseBuilder
 
 logger = logging.getLogger(__name__)
-_MAX_REASONING_RETRIES = 1
+_MAX_REASONING_RETRY_ATTEMPTS = 1
 
 
 class AgentPipeline:
@@ -222,7 +222,8 @@ class AgentPipeline:
         response = self._builder.build_search_response(state)
         evaluation: EvaluationResult = await self._evaluation_agent.run(final_structured, response)
         retries = 0
-        while evaluation.should_retry and retries < _MAX_REASONING_RETRIES:
+        ambiguity_normalized_cache: Dict[str, NormalizedItem] = {}
+        while evaluation.should_retry and retries < _MAX_REASONING_RETRY_ATTEMPTS:
             retries += 1
             final_structured.learning_signals.retry_count = retries
             final_structured.learning_signals.evaluation_notes.extend(evaluation.correction_suggestions)
@@ -231,13 +232,15 @@ class AgentPipeline:
                 if budget_amount > 0:
                     filtered = [
                         item for item in state["ranking_result"].ranked_list
-                        if item.product.price <= budget_amount
+                        if item.product and item.product.price is not None and item.product.price <= budget_amount
                     ]
                     state["ranking_result"].ranked_list = filtered
                     state["ranking_result"].best_option = filtered[0] if filtered else None
             if "ambiguity_failure" in evaluation.failure_signals and final_structured.ambiguity.candidate_entities:
                 fallback_entity = final_structured.ambiguity.candidate_entities[0]
-                state["normalized_item"] = await self._normalization_agent.run(fallback_entity)
+                if fallback_entity not in ambiguity_normalized_cache:
+                    ambiguity_normalized_cache[fallback_entity] = await self._normalization_agent.run(fallback_entity)
+                state["normalized_item"] = ambiguity_normalized_cache[fallback_entity]
                 state["unified_product"] = await self._product_agent.run(sq, state["normalized_item"])
                 state["ranking_result"] = await self._ranking_agent.run(
                     state["unified_product"],

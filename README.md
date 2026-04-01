@@ -179,6 +179,9 @@ Request:
 ### `POST /search`
 Execution-layer endpoint. Accepts **FinalStructuredQuery only** and executes matching/ranking/deals from structured intelligence.
 
+### `POST /execute`
+Strict execution alias for `/search` with the same `FinalStructuredQuery`-only contract.
+
 Request:
 
 ```json
@@ -242,6 +245,8 @@ All intelligence stages use explicit machine-consumable schemas from `app/data/m
 - `AmbiguityDecision`: candidate entities + delayed-resolution strategy.
 - `FallbackDecision`: fallback mode/reason/alternatives.
 - `ExecutionPlan`: adaptive execution routing steps and reason.
+- `UserContext`: personalization context (preferences, dietary patterns, budget habits).
+- `LearningSignals`: closed-loop learning metadata (normalization reinforcement, ranking adjustments, retries, evaluation notes).
 - `FinalStructuredQuery`: all intelligence outputs + `StructuredQuery`.
 
 `/parse-query` returns `FinalStructuredQuery` directly.
@@ -259,6 +264,8 @@ All intelligence stages use explicit machine-consumable schemas from `app/data/m
 - `FallbackAgent` — ambiguity/exploratory fallback strategy.
 - `AmbiguityReasoningAgent` — delayed-resolution decisioning for ambiguous queries.
 - `ExecutionPlannerAgent` — dynamic route planning for multi-intent execution.
+- `UserContextAgent` — derives personalization context for planning/ranking adaptation.
+- `EvaluationAgent` — validates execution quality and drives `plan → execute → evaluate → refine` retries.
 - `OutputFormatterAgent` — final strict structured output assembly.
 - `SynonymMemoryAgent` — remembers raw-term → canonical mappings.
 - `QueryLoggingAgent` — stage-wise structured observability + learning/failure counters.
@@ -274,6 +281,7 @@ All intelligence stages use explicit machine-consumable schemas from `app/data/m
 - Exploratory/vague queries are handled via fallback mode with alternatives.
 - Multi-intent queries produce adaptive execution plans.
 - Learning loop updates synonym memory from successful parsing outcomes.
+- Evaluation loop can refine execution once when ambiguity/constraints indicate low-quality output.
 - Structured output remains deterministic JSON across all endpoints.
 
 ---

@@ -14,7 +14,7 @@ class UserContextAgent:
 
         if "vegan" in text:
             dietary_patterns.append("vegan")
-        if "vegetarian" in text or "veg" in clean_query.tokens:
+        if "vegetarian" in text or any(token == "veg" for token in clean_query.tokens):
             dietary_patterns.append("vegetarian")
         if "organic" in text:
             preferences.append("organic")

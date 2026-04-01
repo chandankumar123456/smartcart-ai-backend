@@ -132,6 +132,39 @@ This system is implemented as a **multi-agent pipeline** (not a single monolithi
 
 ---
 
+## 3.6 UserContextAgent
+
+**File:** `user_context.py`
+
+### Responsibility
+- Build lightweight user context for personalization-aware planning/ranking.
+- Infer dietary and budget behavior hints from query language.
+
+### Input
+- `CleanQuery`
+
+### Output
+- `UserContext`
+
+---
+
+## 3.7 EvaluationAgent
+
+**File:** `evaluation.py`
+
+### Responsibility
+- Validate execution quality and emit retry/refinement signals.
+- Detect ambiguity failures, budget violations, and constraint conflicts.
+
+### Input
+- `FinalStructuredQuery`
+- `FinalResponse`
+
+### Output
+- `EvaluationResult`
+
+---
+
 ## 4) Pipeline Integration
 
 Orchestrator entry: `app/orchestrator/pipeline.py`
@@ -143,6 +176,8 @@ QueryUnderstandingAgent
   → ProductMatchingAgent
   → RankingAgent
   → DealDetectionAgent
+  → EvaluationAgent
+      ↳ if fail: refine and retry once
 ```
 
 Recipe branch:
@@ -208,4 +243,3 @@ The current suite validates:
 - ranking correctness
 - deal detection thresholds
 - recipe mapping and cost estimation
-
