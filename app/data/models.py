@@ -174,6 +174,10 @@ class UserContext(BaseModel):
     dietary_patterns: List[str] = Field(default_factory=list)
     budget_habits: Dict[str, Any] = Field(default_factory=dict)
     historical_behavior: Dict[str, Any] = Field(default_factory=dict)
+    long_term_preferences: Dict[str, float] = Field(default_factory=dict)
+    consumption_habits: Dict[str, float] = Field(default_factory=dict)
+    platform_affinity: Dict[str, float] = Field(default_factory=dict)
+    predicted_needs: List[str] = Field(default_factory=list)
 
 
 class LearningSignals(BaseModel):
@@ -242,7 +246,24 @@ class FinalStructuredQuery(BaseModel):
     learning_signals: LearningSignals = Field(default_factory=LearningSignals)
     evaluation_history: List[EvaluationFrame] = Field(default_factory=list)
     failure_policies: List[FailurePolicy] = Field(default_factory=list)
+    platform_signals: Dict[str, Any] = Field(default_factory=dict)
+    coordination_trace: Dict[str, Any] = Field(default_factory=dict)
     structured_query: StructuredQuery
+
+
+class PlatformEventType(str, Enum):
+    user_behavior = "user.behavior"
+    order_created = "order.created"
+    inventory_updated = "inventory.updated"
+    price_updated = "price.updated"
+
+
+class PlatformEvent(BaseModel):
+    event_type: PlatformEventType
+    user_id: str = "anonymous"
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    timestamp: str = ""
+    source: str = "api"
 
 
 # ---------------------------------------------------------------------------

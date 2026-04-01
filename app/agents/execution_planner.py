@@ -54,11 +54,12 @@ class ExecutionPlannerAgent:
 
         candidate_paths = []
         for idx, candidate in enumerate(candidate_entities[:3]):
+            confidence_penalty = min(_MAX_PATH_CONFIDENCE_BOOST, idx * _PATH_CONFIDENCE_INCREMENT)
             candidate_paths.append(
                 CandidateExecutionPath(
                     path_id=f"path-{idx}",
                     entity_candidate=candidate,
-                    confidence=_BASE_PATH_CONFIDENCE + min(_MAX_PATH_CONFIDENCE_BOOST, idx * _PATH_CONFIDENCE_INCREMENT),
+                    confidence=_BASE_PATH_CONFIDENCE + (_MAX_PATH_CONFIDENCE_BOOST - confidence_penalty),
                 )
             )
 

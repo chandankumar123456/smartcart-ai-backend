@@ -269,3 +269,16 @@ The current suite validates:
 - Ambiguity candidate paths execute independently.
 - Evaluation scores each path and governs whether re-plan is required.
 - Learning loop persists policy updates that influence later planning/ranking behavior.
+
+
+## Shared memory and coordination
+
+Agents now use a shared persistent memory layer (`app/memory/shared.py`) for user models, market signals, and strategy state.
+
+Coordination is handled by a lightweight network (`app/coordination/network.py`) where agents can share and request intermediate signals.
+
+### Decision influence mechanisms
+- Planner publishes ranking preference intent to ranking stage
+- Memory publishes market signals to matching stage
+- Evaluation outcomes and selected path are logged into shared state for future decisions
+- User context contributes predictive needs and long-term preferences into downstream optimization

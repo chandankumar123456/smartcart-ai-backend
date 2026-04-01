@@ -161,6 +161,14 @@ class TestSearchPipeline:
         await pipeline.run_search(parsed2)
         assert any(note.startswith("selected_path:") for note in parsed2.learning_signals.evaluation_notes)
 
+    @pytest.mark.asyncio
+    async def test_parse_query_includes_platform_signals_and_coordination_trace(self, pipeline):
+        parsed = await pipeline.parse_query("milk")
+        assert isinstance(parsed.platform_signals, dict)
+        assert "recommendation_signals" in parsed.platform_signals
+        assert isinstance(parsed.coordination_trace, dict)
+        assert "signals" in parsed.coordination_trace
+
 
 class TestRecipePipeline:
     @pytest.mark.asyncio
@@ -195,6 +203,7 @@ class TestCartOptimizePipeline:
         result = await pipeline.run_cart_optimize(items)
         assert result.metadata.get("intent") == "cart_optimize"
         assert result.metadata.get("item_count") == 2
+        assert result.metadata.get("global_optimization", {}).get("objective") == "cost_delivery_availability"
 
     @pytest.mark.asyncio
     async def test_cart_optimize_empty_items(self, pipeline):

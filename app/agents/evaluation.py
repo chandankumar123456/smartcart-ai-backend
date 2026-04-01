@@ -26,8 +26,6 @@ class EvaluationAgent:
 
         if not response.results:
             add_signal("ambiguity_failure", "branch_with_candidate_entities")
-
-        if not response.results:
             add_signal("poor_match_quality", "expand_entity_variants")
 
         if parsed.constraints.budget and response.best_option:

@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 
-from app.api.routes import cart, recipe, search
+from app.api.routes import cart, events, recipe, search
 from app.cache.redis_cache import get_cache
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
@@ -78,6 +78,7 @@ def create_app() -> FastAPI:
     app.include_router(search.router, tags=["AI Search"])
     app.include_router(recipe.router, tags=["AI Recipe"])
     app.include_router(cart.router, tags=["AI Cart"])
+    app.include_router(events.router, tags=["Platform Intelligence"])
 
     # ------------------------------------------------------------------
     # Health check
@@ -96,7 +97,7 @@ def create_app() -> FastAPI:
         return {
             "name": settings.app_name,
             "version": settings.app_version,
-            "endpoints": ["/parse-query", "/search", "/recipe", "/cart-optimization"],
+            "endpoints": ["/parse-query", "/search", "/recipe", "/cart-optimization", "/platform-events"],
             "docs": "/docs",
         }
 

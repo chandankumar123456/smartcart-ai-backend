@@ -141,7 +141,23 @@ class TestSearchEndpoint:
         assert "learning_signals" in data
         assert "evaluation_history" in data
         assert "failure_policies" in data
+        assert "platform_signals" in data
+        assert "coordination_trace" in data
         assert "structured_query" in data
+
+    def test_platform_events_ingestion_endpoint(self, client):
+        response = client.post(
+            "/platform-events",
+            json={
+                "event_type": "user.behavior",
+                "user_id": "anonymous",
+                "payload": {"action": "click", "item": "milk"},
+                "source": "test",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("accepted") is True
 
     def test_execute_endpoint_accepts_final_structured_query(self, client):
         payload = self._parse_payload(client, "milk")

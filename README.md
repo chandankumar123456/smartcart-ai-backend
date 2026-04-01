@@ -418,3 +418,17 @@ tests/            # Unit + integration + API tests
 
 - **AI Logic documentation**: `app/agents/README.md`
 - **FastAPI Backend documentation**: `app/api/README.md`
+
+
+## Platform-level intelligence integration
+
+The AI layer now consumes platform events through `/platform-events` and continuously updates shared memory used by planning, ranking, and optimization.
+
+### Continuous intelligence loop
+- Event ingestion: user behavior, order creation, inventory and price changes
+- Shared memory: persistent user models, strategy memories, product/market state
+- Distributed coordination: agent signal exchange (`coordination_trace`) for decision influence
+- Real-time adaptation: live inventory/price signals can re-route candidate execution paths during search
+- Predictive behavior: user context includes `predicted_needs` from long-term consumption patterns
+- Cross-service intelligence: recommendation, analytics, and forecast signals influence planning and ranking
+- Global optimization: cart optimization objective now combines cost, delivery, and availability at platform level

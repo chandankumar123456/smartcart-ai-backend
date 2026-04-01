@@ -246,3 +246,23 @@ These tests validate request validation, response shape, and route outcomes.
 
 `/search` and `/execute` consume only `FinalStructuredQuery`.
 The contract includes `execution_graph`, `candidate_paths`, `learning_signals`, `evaluation_history`, and `failure_policies`, enabling adaptive execution without raw query leakage to execution agents.
+
+
+## Platform event intelligence endpoint
+
+### POST /platform-events
+Ingests real-time platform events into the AI intelligence layer.
+
+Accepted event types:
+- `user.behavior`
+- `order.created`
+- `inventory.updated`
+- `price.updated`
+
+Effects on execution:
+- updates shared memory and user model
+- influences parse/query planning via `platform_signals`
+- influences execution via live inventory/price adaptation
+- enriches response metadata with coordination and predictive context
+
+Structured query integration now includes `platform_signals` and `coordination_trace` fields in `FinalStructuredQuery`.
