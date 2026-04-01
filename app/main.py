@@ -34,22 +34,42 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Startup and shutdown lifecycle hooks."""
-    # Startup
-    logger.info("Starting %s v%s", settings.app_name, settings.app_version)
+    logger.info("STEP 0: Starting %s v%s", settings.app_name, settings.app_version)
+
     try:
+        logger.info("STEP 1: Initializing database...")
         init_database()
+        logger.info("STEP 1 DONE")
     except Exception as exc:
-        logger.warning("Database initialization failed, continuing in degraded mode: %s", exc)
+        logger.warning("STEP 1 FAILED (DB): %s", exc)
+
+    logger.info("STEP 2: Getting cache...")
     cache = get_cache()
+
+    logger.info("STEP 3: Connecting cache...")
     await cache.connect()
+    logger.info("STEP 3 DONE")
+
+    logger.info("STEP 4: Getting job queue...")
     queue = get_job_queue()
+
+    logger.info("STEP 5: Starting job queue workers...")
     await queue.start(num_workers=2)
+    logger.info("STEP 5 DONE")
+
+    logger.info("STEP 6: Getting scheduler...")
     scheduler = get_scraper_scheduler()
+
+    logger.info("STEP 7: Starting scheduler...")
     await scheduler.start()
+    logger.info("STEP 7 DONE")
+
+    logger.info("STEP 8: Startup complete")
+
     yield
-    # Shutdown
-    logger.info("Shutting down...")
+
+    logger.info("STEP 9: Shutting down...")
+
     await scheduler.stop()
     await queue.stop()
     await cache.disconnect()
