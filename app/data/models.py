@@ -58,6 +58,65 @@ class QueryMetadata(BaseModel):
     notes: str = ""
 
 
+class CleanQuery(BaseModel):
+    text: str
+    language: str = "en"
+    tokens: List[str] = Field(default_factory=list)
+    normalized_text: str = ""
+
+
+class IntentResult(BaseModel):
+    intent: QueryIntent
+    confidence: float = 0.0
+    notes: str = ""
+
+
+class RawEntity(BaseModel):
+    text: str
+    entity_type: str = "product"
+    confidence: float = 0.0
+
+
+class RawEntities(BaseModel):
+    entities: List[RawEntity] = Field(default_factory=list)
+    primary_entity: Optional[str] = None
+    ambiguity_flags: List[str] = Field(default_factory=list)
+
+
+class NormalizedEntity(BaseModel):
+    raw_text: str
+    canonical_name: str
+    category: Optional[str] = None
+    possible_variants: List[str] = Field(default_factory=list)
+    confidence: float = 0.0
+
+
+class NormalizedEntities(BaseModel):
+    entities: List[NormalizedEntity] = Field(default_factory=list)
+    unresolved_entities: List[str] = Field(default_factory=list)
+
+
+class Constraints(BaseModel):
+    budget: Optional[Dict[str, Any]] = None
+    servings: Optional[int] = None
+    preferences: List[str] = Field(default_factory=list)
+    inferred_quantity_multiplier: float = 1.0
+    ranking_preference_weights: Dict[str, float] = Field(default_factory=dict)
+
+
+class DomainGuardResult(BaseModel):
+    allowed: bool = True
+    confidence: float = 1.0
+    reason: str = ""
+
+
+class FallbackDecision(BaseModel):
+    used: bool = False
+    mode: str = "none"
+    reason: str = ""
+    alternatives: List[str] = Field(default_factory=list)
+
+
 class StructuredQuery(BaseModel):
     """Output of QueryUnderstandingAgent."""
 
@@ -75,9 +134,20 @@ class NormalizedItem(BaseModel):
     """Normalized product intent used before matching."""
 
     canonical_name: str
-    possible_variants: List[str] = []
+    possible_variants: List[str] = Field(default_factory=list)
     category: Optional[str] = None
-    attributes: List[str] = []
+    attributes: List[str] = Field(default_factory=list)
+
+
+class FinalStructuredQuery(BaseModel):
+    clean_query: CleanQuery
+    intent_result: IntentResult
+    raw_entities: RawEntities
+    normalized_entities: NormalizedEntities
+    constraints: Constraints
+    domain_guard: DomainGuardResult
+    fallback: FallbackDecision
+    structured_query: StructuredQuery
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +185,7 @@ class UnifiedProduct(BaseModel):
 
     entity: str
     normalized_name: str = ""
-    platforms: List[PlatformProduct] = []
+    platforms: List[PlatformProduct] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +204,7 @@ class RankingResult(BaseModel):
     """Output of RankingAgent."""
 
     entity: str
-    ranked_list: List[RankedProduct] = []
+    ranked_list: List[RankedProduct] = Field(default_factory=list)
     best_option: Optional[RankedProduct] = None
 
 
@@ -156,8 +226,8 @@ class Deal(BaseModel):
 class DealResult(BaseModel):
     """Output of DealDetectionAgent."""
 
-    deals: List[Deal] = []
-    trending_deals: List[Deal] = []
+    deals: List[Deal] = Field(default_factory=list)
+    trending_deals: List[Deal] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +243,7 @@ class Ingredient(BaseModel):
 
 class IngredientProduct(BaseModel):
     ingredient: Ingredient
-    matched_products: List[PlatformProduct] = []
+    matched_products: List[PlatformProduct] = Field(default_factory=list)
     cheapest_option: Optional[PlatformProduct] = None
 
 
@@ -182,9 +252,9 @@ class RecipeResult(BaseModel):
 
     recipe_name: str
     servings: int = 2
-    ingredients: List[IngredientProduct] = []
+    ingredients: List[IngredientProduct] = Field(default_factory=list)
     total_estimated_cost: float = 0.0
-    missing_items: List[str] = []
+    missing_items: List[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -206,8 +276,8 @@ class CartPlatformGroup(BaseModel):
 class CartOptimizationResult(BaseModel):
     """Result of cart split optimization."""
 
-    original_items: List[CartItem] = []
-    platform_groups: List[CartPlatformGroup] = []
+    original_items: List[CartItem] = Field(default_factory=list)
+    platform_groups: List[CartPlatformGroup] = Field(default_factory=list)
     total_optimized_cost: float = 0.0
     savings: float = 0.0
 
@@ -226,7 +296,7 @@ class PricePoint(BaseModel):
 class PriceHistory(BaseModel):
     entity: str
     platform: Platform
-    history: List[PricePoint] = []
+    history: List[PricePoint] = Field(default_factory=list)
     min_price: Optional[float] = None
     max_price: Optional[float] = None
     avg_price: Optional[float] = None
@@ -241,8 +311,8 @@ class FinalResponse(BaseModel):
     """Standard response format for all AI endpoints."""
 
     query: str = ""
-    results: List[Dict[str, Any]] = []
-    best_option: Dict[str, Any] = {}
-    deals: List[Dict[str, Any]] = []
+    results: List[Dict[str, Any]] = Field(default_factory=list)
+    best_option: Dict[str, Any] = Field(default_factory=dict)
+    deals: List[Dict[str, Any]] = Field(default_factory=list)
     total_price: float = 0.0
-    metadata: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = Field(default_factory=dict)

@@ -1,4 +1,4 @@
-"""POST /ai/cart-optimize — Multi-platform cart cost optimisation endpoint.
+"""POST /cart-optimization — Multi-platform cart cost optimisation endpoint.
 
 README
 ------
@@ -21,7 +21,7 @@ router = APIRouter()
 
 
 @router.post(
-    "/cart-optimize",
+    "/cart-optimization",
     response_model=FinalResponse,
     summary="Optimise cart cost across multiple platforms",
     description=(

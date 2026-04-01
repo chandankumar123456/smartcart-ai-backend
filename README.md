@@ -94,16 +94,26 @@ User → CDN → Load Balancer → FastAPI Backend → AI System → Database/Ca
 
 ## 4) Multi-Agent Pipeline
 
-### Standard Search Pipeline
+### Intelligence + Execution Pipeline
 
 ```text
 User Query
-  → QueryUnderstandingAgent
+  → LanguageProcessingAgent
+  → IntentDetectionAgent
+  → EntityExtractionAgent
+  → NormalizationAgent
+  → ConstraintExtractionAgent
+  → DomainGuardAgent
+  → FallbackAgent
+  → OutputFormatterAgent
+  → (FinalStructuredQuery complete)
   → ProductMatchingAgent
   → RankingAgent
   → DealDetectionAgent
   → ResponseBuilder
 ```
+
+Guarantee: execution never starts before `FinalStructuredQuery` is finalized.
 
 ### Recipe Pipeline
 
@@ -144,10 +154,8 @@ Current platform model supports:
 
 ## 6) API Reference
 
-Base path: `/ai`
-
-### `POST /ai/search`
-Primary query endpoint for grocery search and comparison.
+### `POST /parse-query`
+Intelligence-layer endpoint. Returns machine-usable structured query contract.
 
 Request:
 
@@ -157,7 +165,18 @@ Request:
 }
 ```
 
-### `POST /ai/recipe`
+### `POST /search`
+Execution-layer endpoint. Internally runs `/parse-query` stage first, then matching/ranking/deals.
+
+Request:
+
+```json
+{
+  "query": "cheap milk under 35"
+}
+```
+
+### `POST /recipe`
 Converts recipe intent into ingredient list + mapped products.
 
 Request:
@@ -169,7 +188,7 @@ Request:
 }
 ```
 
-### `POST /ai/cart-optimize`
+### `POST /cart-optimization`
 Optimizes total cart cost with split-order strategy.
 
 Request:
@@ -190,7 +209,49 @@ Request:
 
 ---
 
-## 7) Standard Response Contract
+## 7) Strict Data Contracts
+
+All intelligence stages use explicit machine-consumable schemas from `app/data/models.py`.
+
+- `CleanQuery`: normalized text, language, and token list.
+- `IntentResult`: classified intent + confidence + notes.
+- `RawEntities`: extracted entities with ambiguity flags.
+- `NormalizedEntities`: canonical entities + unresolved entity list.
+- `Constraints`: budget/servings/preferences + ranking preference weights.
+- `DomainGuardResult`: allow/block decision with confidence and reason.
+- `FallbackDecision`: fallback mode/reason/alternatives.
+- `FinalStructuredQuery`: all intelligence outputs + `StructuredQuery`.
+
+`/parse-query` returns `FinalStructuredQuery` directly.
+
+---
+
+## 8) Agent Responsibilities
+
+- `LanguageProcessingAgent` — query cleaning/tokenization.
+- `IntentDetectionAgent` — intent classification.
+- `EntityExtractionAgent` — raw entity extraction.
+- `NormalizationAgent` — canonical item mapping + synonym learning.
+- `ConstraintExtractionAgent` — budget/servings/preferences extraction.
+- `DomainGuardAgent` — grocery-domain safety gating.
+- `FallbackAgent` — ambiguity/exploratory fallback strategy.
+- `OutputFormatterAgent` — final strict structured output assembly.
+- `SynonymMemoryAgent` — remembers raw-term → canonical mappings.
+- `QueryLoggingAgent` — stage-wise structured observability logs.
+
+---
+
+## 9) System Guarantees
+
+- No raw entities are sent to matching/ranking.
+- No execution before structured intelligence is finalized.
+- Unsupported domain queries are blocked by domain guard with structured metadata.
+- Exploratory/vague queries are handled via fallback mode with alternatives.
+- Structured output remains deterministic JSON across all endpoints.
+
+---
+
+## 10) Standard Response Contract
 
 All AI endpoints return structured JSON based on:
 
@@ -208,7 +269,7 @@ Current implementation also includes `metadata` for debugging/observability.
 
 ---
 
-## 8) Configuration
+## 11) Configuration
 
 Environment configuration lives in `.env` (see `.env.example`):
 
@@ -222,7 +283,7 @@ Core settings class: `app/core/config.py`.
 
 ---
 
-## 9) Caching & Queue Design
+## 12) Caching & Queue Design
 
 ### Redis Cache
 
@@ -241,7 +302,7 @@ Background job framework (asyncio-based) supports:
 
 ---
 
-## 10) Error Handling Strategy
+## 13) Error Handling Strategy
 
 - Centralized exception handlers ensure JSON-safe errors
 - LLM failures degrade gracefully via fallbacks
@@ -249,7 +310,7 @@ Background job framework (asyncio-based) supports:
 
 ---
 
-## 11) Local Development
+## 14) Local Development
 
 ### Requirements
 
@@ -277,7 +338,7 @@ python -m pytest -q
 
 ---
 
-## 12) Docker
+## 15) Docker
 
 Build:
 
@@ -293,7 +354,7 @@ docker run --rm -p 8000:8000 smartcart-ai-backend
 
 ---
 
-## 13) Repository Structure
+## 16) Repository Structure
 
 ```text
 app/
@@ -311,7 +372,7 @@ tests/            # Unit + integration + API tests
 
 ---
 
-## 14) Additional Technical Docs
+## 17) Additional Technical Docs
 
 - **AI Logic documentation**: `app/agents/README.md`
 - **FastAPI Backend documentation**: `app/api/README.md`

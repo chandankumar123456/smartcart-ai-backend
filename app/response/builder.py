@@ -37,10 +37,39 @@ class ResponseBuilder:
             },
         )
 
+    def build_domain_guard_response(self, state: Dict[str, Any]) -> FinalResponse:
+        raw_query = state.get("raw_query", "")
+        final_structured = state.get("final_structured_query")
+        domain_guard = final_structured.domain_guard if final_structured else None
+        return FinalResponse(
+            query=raw_query,
+            results=[],
+            best_option={},
+            deals=[],
+            total_price=0.0,
+            metadata={
+                "intent": (
+                    final_structured.intent_result.intent.value
+                    if final_structured
+                    else "unsupported"
+                ),
+                "total_results": 0,
+                "total_deals": 0,
+                "normalized_query": (
+                    final_structured.clean_query.normalized_text
+                    if final_structured
+                    else raw_query
+                ),
+                "domain_guard": domain_guard.model_dump() if domain_guard else {},
+                "notes": "Domain guard blocked execution",
+            },
+        )
+
     def build_search_response(self, state: Dict[str, Any]) -> FinalResponse:
         raw_query = state.get("raw_query", "")
         ranking = state.get("ranking_result")
         deal_result = state.get("deal_result")
+        final_structured = state.get("final_structured_query")
 
         results = []
         if ranking:
@@ -112,6 +141,9 @@ class ResponseBuilder:
                 ],
                 "constraints": (
                     state["structured_query"].constraints.model_dump() if state.get("structured_query") else {}
+                ),
+                "structured_intelligence": (
+                    final_structured.model_dump() if final_structured else {}
                 ),
             },
         )

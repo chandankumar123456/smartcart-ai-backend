@@ -17,6 +17,14 @@ def pipeline() -> AgentPipeline:
 
 class TestSearchPipeline:
     @pytest.mark.asyncio
+    async def test_parse_query_returns_strict_intelligence_output(self, pipeline):
+        parsed = await pipeline.parse_query("cheap milk under 60")
+        assert parsed.clean_query.normalized_text == "cheap milk under 60"
+        assert parsed.intent_result.intent.value == "product_search"
+        assert parsed.domain_guard.allowed is True
+        assert parsed.structured_query.product in {"packaged milk", "milk"}
+
+    @pytest.mark.asyncio
     async def test_search_returns_final_response(self, pipeline):
         result = await pipeline.run_search("milk")
         assert result.query == "milk"
@@ -103,8 +111,7 @@ class TestSearchPipeline:
         result = await pipeline.run_search("book me a flight to mumbai")
         assert result.results == []
         assert result.best_option == {}
-        assert result.metadata.get("intent") == "unsupported"
-        assert "normalized_query" in result.metadata
+        assert result.metadata.get("domain_guard", {}).get("allowed") is False
 
 
 class TestRecipePipeline:

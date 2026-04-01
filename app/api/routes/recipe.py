@@ -1,4 +1,4 @@
-"""POST /ai/recipe — Food planning → grocery conversion endpoint.
+"""POST /recipe — Food planning → grocery conversion endpoint.
 
 README
 ------

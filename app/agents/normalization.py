@@ -7,7 +7,8 @@ using an LLM-first strategy, with deterministic fallback when unavailable.
 import logging
 from typing import Any, Dict, List
 
-from app.data.models import NormalizedItem
+from app.agents.synonym_memory import SynonymMemoryAgent
+from app.data.models import NormalizedEntities, NormalizedEntity, NormalizedItem, RawEntities
 from app.llm.manager import LLMManager
 
 logger = logging.getLogger(__name__)
@@ -131,18 +132,23 @@ def _fallback_normalization(term: str) -> Dict[str, Any]:
 class NormalizationAgent:
     """LLM-first normalizer for open-ended grocery terms."""
 
-    def __init__(self, llm_manager: LLMManager) -> None:
+    def __init__(self, llm_manager: LLMManager, synonym_memory: SynonymMemoryAgent | None = None) -> None:
         self._llm = llm_manager
+        self._synonym_memory = synonym_memory or SynonymMemoryAgent()
 
     async def run(self, term: str) -> NormalizedItem:
         prompt = _PROMPT_TEMPLATE.format(term=term.strip())
-        raw_output: Dict[str, Any]
-        try:
-            raw_output = await self._llm.call(prompt, schema_example=_SCHEMA_EXAMPLE)
-            logger.debug("[NORMALIZATION] input=%s llm_output=%s", term, raw_output)
-        except Exception:
-            logger.debug("[NORMALIZATION] input=%s error=llm_failed_using_fallback", term)
-            raw_output = _fallback_normalization(term)
+        remembered = await self._synonym_memory.lookup(term)
+        if remembered:
+            raw_output = _fallback_normalization(remembered)
+        else:
+            raw_output: Dict[str, Any]
+            try:
+                raw_output = await self._llm.call(prompt, schema_example=_SCHEMA_EXAMPLE)
+                logger.debug("[NORMALIZATION] input=%s llm_output=%s", term, raw_output)
+            except Exception:
+                logger.debug("[NORMALIZATION] input=%s error=llm_failed_using_fallback", term)
+                raw_output = _fallback_normalization(term)
 
         canonical = str(raw_output.get("canonical_name") or term).strip().lower()
         variants = raw_output.get("possible_variants") or []
@@ -171,4 +177,24 @@ class NormalizationAgent:
             item.possible_variants,
             item.category or "",
         )
+        await self._synonym_memory.remember(term, item.canonical_name)
         return item
+
+    async def run_entities(self, raw_entities: RawEntities) -> NormalizedEntities:
+        normalized: List[NormalizedEntity] = []
+        unresolved: List[str] = []
+        for entity in raw_entities.entities:
+            item = await self.run(entity.text)
+            confidence = 0.9 if item.category and item.category != "general" else 0.65
+            normalized.append(
+                NormalizedEntity(
+                    raw_text=entity.text,
+                    canonical_name=item.canonical_name,
+                    category=item.category,
+                    possible_variants=item.possible_variants,
+                    confidence=confidence,
+                )
+            )
+            if confidence < 0.7:
+                unresolved.append(entity.text)
+        return NormalizedEntities(entities=normalized, unresolved_entities=unresolved)
