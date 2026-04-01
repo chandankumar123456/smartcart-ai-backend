@@ -128,9 +128,82 @@ class AmbiguityDecision(BaseModel):
 
 
 class ExecutionPlan(BaseModel):
-    mode: str = "search_only"
+    mode: str = "graph"
     steps: List[str] = Field(default_factory=list)
     reason: str = ""
+    plan_id: str = ""
+    entry_nodes: List[str] = Field(default_factory=list)
+    terminal_nodes: List[str] = Field(default_factory=list)
+    adaptive_flags: Dict[str, bool] = Field(default_factory=dict)
+
+
+class ExecutionNode(BaseModel):
+    node_id: str
+    operation: str
+    depends_on: List[str] = Field(default_factory=list)
+    condition: str = "always"
+    path_id: str = "primary"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecutionGraph(BaseModel):
+    graph_id: str
+    nodes: List[ExecutionNode] = Field(default_factory=list)
+    edges: List[Dict[str, str]] = Field(default_factory=list)
+
+
+class CandidateExecutionPath(BaseModel):
+    path_id: str
+    entity_candidate: str
+    confidence: float = 0.0
+    status: str = "pending"
+    quality_score: float = 0.0
+    selected: bool = False
+
+
+class FailurePolicy(BaseModel):
+    failure_type: str
+    action: str
+    retries_allowed: int = 0
+    applied: bool = False
+
+
+class UserContext(BaseModel):
+    user_id: str = ""
+    preferences: List[str] = Field(default_factory=list)
+    dietary_patterns: List[str] = Field(default_factory=list)
+    budget_habits: Dict[str, Any] = Field(default_factory=dict)
+    historical_behavior: Dict[str, Any] = Field(default_factory=dict)
+    long_term_preferences: Dict[str, float] = Field(default_factory=dict)
+    consumption_habits: Dict[str, float] = Field(default_factory=dict)
+    platform_affinity: Dict[str, float] = Field(default_factory=dict)
+    predicted_needs: List[str] = Field(default_factory=list)
+
+
+class LearningSignals(BaseModel):
+    normalization_reinforced: List[str] = Field(default_factory=list)
+    failed_matches: List[str] = Field(default_factory=list)
+    ranking_adjustments: Dict[str, float] = Field(default_factory=dict)
+    constraint_violations: List[str] = Field(default_factory=list)
+    evaluation_notes: List[str] = Field(default_factory=list)
+    retry_count: int = 0
+
+
+class EvaluationResult(BaseModel):
+    success: bool = True
+    should_retry: bool = False
+    failure_signals: List[str] = Field(default_factory=list)
+    correction_suggestions: List[str] = Field(default_factory=list)
+    quality_score: float = 0.0
+    chosen_path_id: str = ""
+
+
+class EvaluationFrame(BaseModel):
+    iteration: int = 0
+    path_id: str = ""
+    quality_score: float = 0.0
+    failures: List[str] = Field(default_factory=list)
+    corrections: List[str] = Field(default_factory=list)
 
 
 class StructuredQuery(BaseModel):
@@ -165,7 +238,32 @@ class FinalStructuredQuery(BaseModel):
     ambiguity: AmbiguityDecision = Field(default_factory=AmbiguityDecision)
     fallback: FallbackDecision
     execution_plan: ExecutionPlan = Field(default_factory=ExecutionPlan)
+    execution_graph: ExecutionGraph = Field(
+        default_factory=lambda: ExecutionGraph(graph_id="unplanned")
+    )
+    candidate_paths: List[CandidateExecutionPath] = Field(default_factory=list)
+    user_context: UserContext = Field(default_factory=UserContext)
+    learning_signals: LearningSignals = Field(default_factory=LearningSignals)
+    evaluation_history: List[EvaluationFrame] = Field(default_factory=list)
+    failure_policies: List[FailurePolicy] = Field(default_factory=list)
+    platform_signals: Dict[str, Any] = Field(default_factory=dict)
+    coordination_trace: Dict[str, Any] = Field(default_factory=dict)
     structured_query: StructuredQuery
+
+
+class PlatformEventType(str, Enum):
+    user_behavior = "user.behavior"
+    order_created = "order.created"
+    inventory_updated = "inventory.updated"
+    price_updated = "price.updated"
+
+
+class PlatformEvent(BaseModel):
+    event_type: PlatformEventType
+    user_id: str = "anonymous"
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    timestamp: str = ""
+    source: str = "api"
 
 
 # ---------------------------------------------------------------------------

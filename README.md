@@ -179,6 +179,9 @@ Request:
 ### `POST /search`
 Execution-layer endpoint. Accepts **FinalStructuredQuery only** and executes matching/ranking/deals from structured intelligence.
 
+### `POST /execute`
+Strict execution alias for `/search` with the same `FinalStructuredQuery`-only contract.
+
 Request:
 
 ```json
@@ -192,6 +195,12 @@ Request:
   "ambiguity": { "...": "..." },
   "fallback": { "...": "..." },
   "execution_plan": { "...": "..." },
+  "execution_graph": { "...": "..." },
+  "candidate_paths": [],
+  "user_context": { "...": "..." },
+  "learning_signals": { "...": "..." },
+  "evaluation_history": [],
+  "failure_policies": [],
   "structured_query": { "...": "..." }
 }
 ```
@@ -242,6 +251,8 @@ All intelligence stages use explicit machine-consumable schemas from `app/data/m
 - `AmbiguityDecision`: candidate entities + delayed-resolution strategy.
 - `FallbackDecision`: fallback mode/reason/alternatives.
 - `ExecutionPlan`: adaptive execution routing steps and reason.
+- `UserContext`: personalization context (preferences, dietary patterns, budget habits).
+- `LearningSignals`: closed-loop learning metadata (normalization reinforcement, ranking adjustments, retries, evaluation notes).
 - `FinalStructuredQuery`: all intelligence outputs + `StructuredQuery`.
 
 `/parse-query` returns `FinalStructuredQuery` directly.
@@ -258,7 +269,10 @@ All intelligence stages use explicit machine-consumable schemas from `app/data/m
 - `DomainGuardAgent` — grocery-domain safety gating.
 - `FallbackAgent` — ambiguity/exploratory fallback strategy.
 - `AmbiguityReasoningAgent` — delayed-resolution decisioning for ambiguous queries.
-- `ExecutionPlannerAgent` — dynamic route planning for multi-intent execution.
+- `ExecutionPlannerAgent` — graph-based planning for conditional, branching execution.
+- `ConstraintOptimizerAgent` — multi-objective optimization weights and candidate scoring.
+- `UserContextAgent` — derives personalization context for planning/ranking adaptation.
+- `EvaluationAgent` — governing decision authority that scores each candidate path and drives iterative re-planning.
 - `OutputFormatterAgent` — final strict structured output assembly.
 - `SynonymMemoryAgent` — remembers raw-term → canonical mappings.
 - `QueryLoggingAgent` — stage-wise structured observability + learning/failure counters.
@@ -274,6 +288,7 @@ All intelligence stages use explicit machine-consumable schemas from `app/data/m
 - Exploratory/vague queries are handled via fallback mode with alternatives.
 - Multi-intent queries produce adaptive execution plans.
 - Learning loop updates synonym memory from successful parsing outcomes.
+- Evaluation loop can refine execution once when ambiguity/constraints indicate low-quality output.
 - Structured output remains deterministic JSON across all endpoints.
 
 ---
@@ -403,3 +418,17 @@ tests/            # Unit + integration + API tests
 
 - **AI Logic documentation**: `app/agents/README.md`
 - **FastAPI Backend documentation**: `app/api/README.md`
+
+
+## Platform-level intelligence integration
+
+The AI layer now consumes platform events through `/platform-events` and continuously updates shared memory used by planning, ranking, and optimization.
+
+### Continuous intelligence loop
+- Event ingestion: user behavior, order creation, inventory and price changes
+- Shared memory: persistent user models, strategy memories, product/market state
+- Distributed coordination: agent signal exchange (`coordination_trace`) for decision influence
+- Real-time adaptation: live inventory/price signals can re-route candidate execution paths during search
+- Predictive behavior: user context includes `predicted_needs` from long-term consumption patterns
+- Cross-service intelligence: recommendation, analytics, and forecast signals influence planning and ranking
+- Global optimization: cart optimization objective now combines cost, delivery, and availability at platform level

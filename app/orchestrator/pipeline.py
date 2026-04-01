@@ -18,9 +18,11 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from app.agents.constraint_extraction import ConstraintExtractionAgent
+from app.agents.constraint_optimizer import ConstraintOptimizerAgent
 from app.agents.deal_detection import DealDetectionAgent
 from app.agents.domain_guard import DomainGuardAgent
 from app.agents.ambiguity_reasoning import AmbiguityReasoningAgent
+from app.agents.evaluation import EvaluationAgent
 from app.agents.entity_extraction import EntityExtractionAgent
 from app.agents.execution_planner import ExecutionPlannerAgent
 from app.agents.intent_detection import IntentDetectionAgent
@@ -34,27 +36,43 @@ from app.agents.query_understanding import QueryUnderstandingAgent
 from app.agents.ranking import RankingAgent
 from app.agents.recipe import RecipeAgent
 from app.agents.synonym_memory import SynonymMemoryAgent
+from app.agents.user_context import UserContextAgent
 from app.data.layer import get_products_for_entity
 from app.data.models import (
     CartItem,
     CartOptimizationResult,
     CartPlatformGroup,
+    FailurePolicy,
     FinalStructuredQuery,
     FinalResponse,
     NormalizedItem,
     QueryFilters,
     QueryMetadata,
     QueryIntent,
+    LearningSignals,
+    EvaluationResult,
+    EvaluationFrame,
+    PlatformEvent,
+    PlatformEventType,
     QueryConstraints,
     RecipeResult,
     StructuredItem,
     StructuredQuery,
 )
+from app.coordination.network import get_coordination_network
+from app.events.platform_events import get_platform_event_intelligence
+from app.memory.shared import get_shared_memory
 from app.learning.feedback import LearningLoop
 from app.llm.manager import LLMManager, get_llm_manager
 from app.response.builder import ResponseBuilder
 
 logger = logging.getLogger(__name__)
+_MAX_REASONING_RETRY_ATTEMPTS = 3
+_MAX_CANDIDATE_ENTITIES = 3
+_MIN_OPTIMIZATION_SCORE = 0.2
+_GLOBAL_OPTIMIZATION_DELIVERY_WEIGHT = 0.2
+_DEFAULT_DELIVERY_MINUTES = 30.0
+_MAX_DELIVERY_MINUTES = 90.0
 
 
 class AgentPipeline:
@@ -75,6 +93,9 @@ class AgentPipeline:
         self._domain_guard_agent = DomainGuardAgent()
         self._ambiguity_agent = AmbiguityReasoningAgent()
         self._execution_planner_agent = ExecutionPlannerAgent()
+        self._evaluation_agent = EvaluationAgent()
+        self._user_context_agent = UserContextAgent()
+        self._constraint_optimizer = ConstraintOptimizerAgent()
         self._fallback_agent = FallbackAgent()
         self._formatter_agent = OutputFormatterAgent()
         self._query_logger = QueryLoggingAgent()
@@ -86,6 +107,9 @@ class AgentPipeline:
         self._recipe_agent = RecipeAgent(llm)
         self._builder = ResponseBuilder()
         self._learning_loop = LearningLoop(self._synonym_memory)
+        self._platform_events = get_platform_event_intelligence()
+        self._shared_memory = get_shared_memory()
+        self._coordination = get_coordination_network()
 
     # ------------------------------------------------------------------
     # Public entry points
@@ -110,8 +134,35 @@ class AgentPipeline:
         await self._query_logger.run("ambiguity_reasoning", ambiguity.model_dump())
         fallback = await self._fallback_agent.run(normalized_entities, intent_result.intent)
         await self._query_logger.run("fallback", fallback.model_dump())
-        execution_plan = await self._execution_planner_agent.run(intent_result)
+        user_context = await self._user_context_agent.run(clean_query)
+        await self._query_logger.run("user_context", user_context.model_dump())
+        execution_plan, execution_graph, candidate_paths = await self._execution_planner_agent.run(
+            intent_result=intent_result,
+            constraints=constraints,
+            user_context=user_context,
+            candidate_entities=ambiguity.candidate_entities or raw_entities.candidate_entities,
+        )
         await self._query_logger.run("execution_planning", execution_plan.model_dump())
+        ranking_adjustments = self._constraint_optimizer.derive_weights(
+            constraints.ranking_preference_weights,
+            constraints.preferences,
+            user_context.preferences,
+        )
+        constraints.ranking_preference_weights = ranking_adjustments
+        failure_policies = [
+            FailurePolicy(failure_type="vague_query", action="branch_candidates", retries_allowed=2),
+            FailurePolicy(failure_type="constraint_violation", action="rebalance_budget", retries_allowed=2),
+            FailurePolicy(failure_type="missing_entities", action="fallback_search", retries_allowed=1),
+            FailurePolicy(failure_type="external_failure", action="graceful_degrade", retries_allowed=1),
+        ]
+        learning_signals = LearningSignals(
+            normalization_reinforced=[e.canonical_name for e in normalized_entities.entities if e.canonical_name],
+            failed_matches=list(normalized_entities.unresolved_entities),
+            ranking_adjustments=ranking_adjustments,
+            constraint_violations=list(constraints.conflict_notes),
+            evaluation_notes=[],
+            retry_count=0,
+        )
 
         primary_normalized_entity = normalized_entities.entities[0] if normalized_entities.entities else None
         primary_entity = primary_normalized_entity.canonical_name if primary_normalized_entity else ""
@@ -149,8 +200,30 @@ class AgentPipeline:
             ambiguity=ambiguity,
             fallback=fallback,
             execution_plan=execution_plan,
+            execution_graph=execution_graph,
+            candidate_paths=candidate_paths,
+            user_context=user_context,
+            learning_signals=learning_signals,
+            evaluation_history=[],
+            failure_policies=failure_policies,
             structured_query=structured_query,
         )
+        strategy = await self._shared_memory.get_strategy("recommendation_signals")
+        final_structured.platform_signals = {
+            "recommendation_signals": strategy.get("recommendation_signals", {}),
+            "analytics_signals": strategy.get("analytics_signals", {}),
+            "forecast_signals": strategy.get("forecast_signals", {}),
+        }
+        if strategy.get("recommendation_signals", {}).get("preferences"):
+            for pref in strategy["recommendation_signals"]["preferences"]:
+                if pref not in final_structured.user_context.preferences:
+                    final_structured.user_context.preferences.append(pref)
+        if strategy.get("forecast_signals", {}).get("predicted_needs"):
+            for need in strategy["forecast_signals"]["predicted_needs"]:
+                if need not in final_structured.user_context.predicted_needs:
+                    final_structured.user_context.predicted_needs.append(need)
+        self._coordination.share("planner", "ranking", "ranking_preferences", constraints.ranking_preference_weights)
+        final_structured.coordination_trace = self._coordination.trace()
         await self._query_logger.run("output_formatter", final_structured.model_dump())
         await self._learning_loop.learn_from_success(final_structured)
         state["final_structured_query"] = final_structured
@@ -169,38 +242,141 @@ class AgentPipeline:
         sq: StructuredQuery = state["structured_query"]
         if sq.intent == QueryIntent.unsupported:
             return self._builder.build_unsupported_response(state)
-        if final_structured.execution_plan.mode in {"recipe_only", "recipe_then_cart_optimization"}:
+        if any(n.operation == "recipe_generation" for n in final_structured.execution_graph.nodes):
             response = await self.run_recipe(final_structured.clean_query.text)
-            if final_structured.execution_plan.mode == "recipe_then_cart_optimization":
+            if any(n.operation == "cart_optimization" for n in final_structured.execution_graph.nodes):
                 response.metadata["secondary_intents"] = [i.value for i in final_structured.intent_result.secondary_intents]
                 response.metadata["execution_plan"] = final_structured.execution_plan.model_dump()
             return response
-
-        if final_structured.normalized_entities.entities:
-            primary_normalized = final_structured.normalized_entities.entities[0]
-            state["normalized_item"] = NormalizedItem(
-                canonical_name=primary_normalized.canonical_name,
-                possible_variants=primary_normalized.possible_variants,
-                category=primary_normalized.category,
-                attributes=[],
+        policy = await self._learning_loop.load_policy(final_structured.clean_query.normalized_text)
+        market_signals = await self._shared_memory.get_strategy("market_signals")
+        self._coordination.share("memory", "matching", "market_signals", market_signals)
+        ranking_boost = self._coordination.request("ranking", "ranking_preferences", {})
+        if policy.get("ranking_adjustments"):
+            final_structured.constraints.ranking_preference_weights = self._constraint_optimizer.derive_weights(
+                policy.get("ranking_adjustments", {}),
+                final_structured.constraints.preferences,
+                final_structured.user_context.preferences,
             )
+        if ranking_boost:
+            merged = dict(final_structured.constraints.ranking_preference_weights)
+            merged.update({k: float(v) for k, v in ranking_boost.items()})
+            final_structured.constraints.ranking_preference_weights = merged
+        candidate_entities = [c.entity_candidate for c in final_structured.candidate_paths] or [sq.product]
+        if final_structured.normalized_entities.entities:
+            primary = final_structured.normalized_entities.entities[0]
+            candidate_entities = [primary.canonical_name, *candidate_entities]
+        candidate_entities = self._sanitize_candidate_entities(candidate_entities)
+
+        best_response: Optional[FinalResponse] = None
+        best_eval = EvaluationResult(success=False, should_retry=True, quality_score=0.0)
+        best_path = ""
+        retries = 0
+        while retries < _MAX_REASONING_RETRY_ATTEMPTS:
+            path_results: List[tuple[str, FinalResponse, EvaluationResult]] = []
+            for idx, entity in enumerate(candidate_entities):
+                path_id = f"path-{idx}"
+                path_state = dict(state)
+                normalized = await self._normalization_agent.run(entity)
+                path_state["normalized_item"] = normalized
+                path_state["unified_product"] = await self._product_agent.run(sq, normalized)
+                live_entity = market_signals.get(normalized.canonical_name, {}) if isinstance(market_signals, dict) else {}
+                if live_entity.get("in_stock") is False:
+                    alt_candidates = [c for c in candidate_entities if c != entity]
+                    if alt_candidates:
+                        normalized = await self._normalization_agent.run(alt_candidates[0])
+                        path_state["normalized_item"] = normalized
+                        path_state["unified_product"] = await self._product_agent.run(sq, normalized)
+                if live_entity.get("price") is not None:
+                    live_price = float(live_entity.get("price"))
+                    for p in path_state["unified_product"].platforms:
+                        if p.normalized_name == normalized.canonical_name.lower().strip():
+                            p.price = min(p.price, live_price)
+                path_state["ranking_result"] = await self._ranking_agent.run(
+                    path_state["unified_product"],
+                    ranking_preferences=final_structured.constraints.ranking_preference_weights,
+                )
+                budget_limit = (final_structured.constraints.budget or {}).get("amount")
+                path_state["ranking_result"] = self._apply_budget_optimization(
+                    path_state["ranking_result"],
+                    budget_limit,
+                )
+                path_state["deal_result"] = await self._deal_agent.run(path_state["unified_product"])
+                if "deal_detection" not in final_structured.execution_plan.steps:
+                    path_state["deal_result"].deals = []
+                    path_state["deal_result"].trending_deals = []
+                candidate_response = self._builder.build_search_response(path_state)
+                candidate_eval = await self._evaluation_agent.run(final_structured, candidate_response)
+                final_structured.evaluation_history.append(
+                    EvaluationFrame(
+                        iteration=retries,
+                        path_id=path_id,
+                        quality_score=candidate_eval.quality_score,
+                        failures=candidate_eval.failure_signals,
+                        corrections=candidate_eval.correction_suggestions,
+                    )
+                )
+                path_results.append((path_id, candidate_response, candidate_eval))
+
+            chosen = max(path_results, key=lambda x: x[2].quality_score)
+            best_path, best_response, best_eval = chosen
+            if not best_eval.should_retry:
+                break
+            retries += 1
+            final_structured.learning_signals.retry_count = retries
+            final_structured.learning_signals.evaluation_notes.extend(best_eval.correction_suggestions)
+            if "poor_match_quality" in best_eval.failure_signals:
+                candidate_entities = self._sanitize_candidate_entities(
+                    candidate_entities + (final_structured.ambiguity.candidate_entities or [])
+                )
+            if "constraint_violation" in best_eval.failure_signals:
+                final_structured.constraints.ranking_preference_weights = self._constraint_optimizer.derive_weights(
+                    final_structured.constraints.ranking_preference_weights,
+                    ["cheap", *final_structured.constraints.preferences],
+                    final_structured.user_context.preferences,
+                )
+
+        for path in final_structured.candidate_paths:
+            path.selected = path.path_id == best_path
+            if path.selected:
+                path.quality_score = best_eval.quality_score
+                path.status = "selected"
+            else:
+                path.status = "evaluated"
+        final_structured.learning_signals.evaluation_notes.append(f"selected_path:{best_path}")
+        await self._query_logger.run("evaluation", best_eval.model_dump())
+        if not best_eval.success:
+            for policy_item in final_structured.failure_policies:
+                if policy_item.failure_type in (best_eval.failure_signals or []):
+                    policy_item.applied = True
+        state["final_structured_query"] = final_structured
+        response = best_response or self._builder.build_search_response(state)
+        if final_structured.user_context.predicted_needs:
+            response.metadata["predicted_needs"] = final_structured.user_context.predicted_needs
+        response.metadata["coordination_trace"] = self._coordination.trace()
+        response.metadata["platform_signals"] = final_structured.platform_signals
+        budget_limit = (final_structured.constraints.budget or {}).get("amount")
+        if budget_limit and response.best_option:
+            if float(response.best_option.get("price", 0)) > float(budget_limit):
+                response.best_option = {}
+                response.results = [r for r in response.results if float(r.get("price", 0)) <= float(budget_limit)]
+                response.total_price = response.results[0]["price"] if response.results else 0.0
+        if best_eval.success:
+            await self._learning_loop.learn_from_success(final_structured)
         else:
-            normalized_term = sq.product or final_structured.clean_query.text
-            state["normalized_item"] = await self._normalization_agent.run(normalized_term)
-        state["unified_product"] = await self._product_agent.run(sq, state["normalized_item"])
-        state["ranking_result"] = await self._ranking_agent.run(
-            state["unified_product"],
-            ranking_preferences=final_structured.constraints.ranking_preference_weights,
+            await self._learning_loop.learn_from_outcome(final_structured, success=False)
+        await self._platform_events.ingest(
+            event=PlatformEvent(
+                event_type=PlatformEventType.user_behavior,
+                user_id=final_structured.user_context.user_id or "anonymous",
+                payload={
+                    "action": "search_execute",
+                    "query": final_structured.clean_query.normalized_text,
+                    "best_option": response.best_option.get("name") if isinstance(response.best_option, dict) else None,
+                    "selected_path": best_path,
+                },
+            )
         )
-        logger.debug(
-            "[RANKING] items_processed=%s",
-            len(state["ranking_result"].ranked_list),
-        )
-
-        state["deal_result"] = await self._deal_agent.run(state["unified_product"])
-        logger.debug("[DEALS] deals_count=%s", len(state["deal_result"].deals))
-
-        response = self._builder.build_search_response(state)
         logger.debug(
             "[FINAL_OUTPUT] result_count=%s total_price=%s deals=%s",
             len(response.results),
@@ -231,25 +407,21 @@ class AgentPipeline:
         )
         state: Dict[str, Any] = {"cart_items": items}
 
-        # For each item, find cheapest option across platforms
-        item_cheapest: Dict[str, Any] = {}
+        # For each item, find globally optimized option across platforms (cost + delivery)
+        item_best: Dict[str, Any] = {}
         for item in items:
             normalized_item = await self._normalization_agent.run(item.name)
             products = get_products_for_entity(normalized_item.canonical_name)
             if not products:
                 continue
-            cheapest = min(
-                (p for p in products if p.in_stock),
-                key=lambda p: p.price,
-                default=None,
-            )
-            if cheapest:
-                item_cheapest[item.name] = cheapest
+            best = min((p for p in products if p.in_stock), key=self._global_product_objective, default=None)
+            if best:
+                item_best[item.name] = best
 
         # Group cheapest items by platform
         platform_groups: Dict[str, CartPlatformGroup] = {}
         total_cost = 0.0
-        for item_name, product in item_cheapest.items():
+        for item_name, product in item_best.items():
             plat = product.platform
             if plat not in platform_groups:
                 platform_groups[plat] = CartPlatformGroup(platform=plat, items=[], subtotal=0.0)
@@ -278,6 +450,11 @@ class AgentPipeline:
         )
         state["cart_result"] = result
         response = self._builder.build_cart_response(state)
+        response.metadata["global_optimization"] = {
+            "objective": "cost_delivery_availability",
+            "delivery_weight": _GLOBAL_OPTIMIZATION_DELIVERY_WEIGHT,
+            "stores_considered": list({group.platform.value for group in result.platform_groups}),
+        }
         logger.debug(
             "[FINAL_OUTPUT] result_count=%s total_price=%s deals=%s",
             len(response.results),
@@ -285,6 +462,42 @@ class AgentPipeline:
             len(response.deals),
         )
         return response
+
+    @staticmethod
+    def _sanitize_candidate_entities(entities: List[str]) -> List[str]:
+        return list(dict.fromkeys([e for e in entities if isinstance(e, str) and e.strip()]))[:_MAX_CANDIDATE_ENTITIES]
+
+    def _apply_budget_optimization(self, ranking_result: Any, budget_limit: Any) -> Any:
+        if not budget_limit:
+            return ranking_result
+        hard_budget_ranked = [
+            item for item in ranking_result.ranked_list
+            if item.product and item.product.price <= float(budget_limit)
+        ]
+        ranked = []
+        source_ranked = hard_budget_ranked or ranking_result.ranked_list
+        source_ranked_keys = {(item.product.platform.value, item.product.product_id) for item in source_ranked}
+        for item in ranking_result.ranked_list:
+            item_key = (item.product.platform.value, item.product.product_id)
+            if item_key not in source_ranked_keys:
+                continue
+            optimization_score = self._constraint_optimizer.score_candidate(
+                item.product,
+                float(budget_limit),
+            )
+            if optimization_score > _MIN_OPTIMIZATION_SCORE and (not hard_budget_ranked or item.product.price <= float(budget_limit)):
+                ranked.append(item)
+        ranking_result.ranked_list = ranked
+        ranking_result.best_option = ranked[0] if ranked else None
+        return ranking_result
+
+    @staticmethod
+    def _global_product_objective(product: Any) -> float:
+        normalized_delivery = (
+            min(float(product.delivery_time_minutes or _DEFAULT_DELIVERY_MINUTES), _MAX_DELIVERY_MINUTES)
+            / _MAX_DELIVERY_MINUTES
+        )
+        return product.price + (_GLOBAL_OPTIMIZATION_DELIVERY_WEIGHT * normalized_delivery * product.price)
 
 
 # Module-level singleton

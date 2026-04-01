@@ -132,6 +132,39 @@ This system is implemented as a **multi-agent pipeline** (not a single monolithi
 
 ---
 
+## 3.6 UserContextAgent
+
+**File:** `user_context.py`
+
+### Responsibility
+- Build lightweight user context for personalization-aware planning/ranking.
+- Infer dietary and budget behavior hints from query language.
+
+### Input
+- `CleanQuery`
+
+### Output
+- `UserContext`
+
+---
+
+## 3.7 EvaluationAgent
+
+**File:** `evaluation.py`
+
+### Responsibility
+- Validate execution quality and emit retry/refinement signals.
+- Detect ambiguity failures, budget violations, and constraint conflicts.
+
+### Input
+- `FinalStructuredQuery`
+- `FinalResponse`
+
+### Output
+- `EvaluationResult`
+
+---
+
 ## 4) Pipeline Integration
 
 Orchestrator entry: `app/orchestrator/pipeline.py`
@@ -143,6 +176,8 @@ QueryUnderstandingAgent
   → ProductMatchingAgent
   → RankingAgent
   → DealDetectionAgent
+  → EvaluationAgent
+      ↳ if fail: refine and retry once
 ```
 
 Recipe branch:
@@ -209,3 +244,41 @@ The current suite validates:
 - deal detection thresholds
 - recipe mapping and cost estimation
 
+
+## 3.8 ConstraintOptimizerAgent
+
+**File:** `constraint_optimizer.py`
+
+### Responsibility
+- Convert constraints + user preferences into adaptive ranking weights.
+- Score candidates with budget/availability tradeoffs for optimization.
+
+### Input
+- Constraint weight map
+- Query preferences and user preferences
+- Candidate product
+
+### Output
+- Optimized weights and objective score
+
+---
+
+## 9) Agent Interaction Pattern
+
+- Planner creates a graph with conditional nodes and branch paths.
+- Ambiguity candidate paths execute independently.
+- Evaluation scores each path and governs whether re-plan is required.
+- Learning loop persists policy updates that influence later planning/ranking behavior.
+
+
+## Shared memory and coordination
+
+Agents now use a shared persistent memory layer (`app/memory/shared.py`) for user models, market signals, and strategy state.
+
+Coordination is handled by a lightweight network (`app/coordination/network.py`) where agents can share and request intermediate signals.
+
+### Decision influence mechanisms
+- Planner publishes ranking preference intent to ranking stage
+- Memory publishes market signals to matching stage
+- Evaluation outcomes and selected path are logged into shared state for future decisions
+- User context contributes predictive needs and long-term preferences into downstream optimization

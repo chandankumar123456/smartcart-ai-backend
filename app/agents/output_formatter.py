@@ -7,13 +7,19 @@ from app.data.models import (
     Constraints,
     DomainGuardResult,
     ExecutionPlan,
+    ExecutionGraph,
+    CandidateExecutionPath,
+    EvaluationFrame,
+    FailurePolicy,
     FinalStructuredQuery,
     FallbackDecision,
     IntentResult,
+    LearningSignals,
     NormalizedEntities,
     RawEntities,
     StructuredQuery,
     CleanQuery,
+    UserContext,
 )
 
 
@@ -29,6 +35,12 @@ class OutputFormatterAgent:
         ambiguity: AmbiguityDecision,
         fallback: FallbackDecision,
         execution_plan: ExecutionPlan,
+        execution_graph: ExecutionGraph,
+        candidate_paths: list[CandidateExecutionPath],
+        user_context: UserContext,
+        learning_signals: LearningSignals,
+        evaluation_history: list[EvaluationFrame],
+        failure_policies: list[FailurePolicy],
         structured_query: StructuredQuery,
     ) -> FinalStructuredQuery:
         return FinalStructuredQuery(
@@ -41,5 +53,11 @@ class OutputFormatterAgent:
             ambiguity=ambiguity,
             fallback=fallback,
             execution_plan=execution_plan,
+            execution_graph=execution_graph,
+            candidate_paths=candidate_paths,
+            user_context=user_context,
+            learning_signals=learning_signals,
+            evaluation_history=evaluation_history,
+            failure_policies=failure_policies,
             structured_query=structured_query,
         )

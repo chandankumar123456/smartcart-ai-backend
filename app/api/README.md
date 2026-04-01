@@ -28,9 +28,9 @@ It is responsible for:
 app/api/
   request_handler.py      # request schemas + validators
   routes/
-    search.py             # /ai/search
-    recipe.py             # /ai/recipe
-    cart.py               # /ai/cart-optimize
+    search.py             # /parse-query, /search, /execute
+    recipe.py             # /recipe
+    cart.py               # /cart-optimization
 ```
 
 Application bootstrap is in `app/main.py`.
@@ -39,24 +39,43 @@ Application bootstrap is in `app/main.py`.
 
 ## 3) Exposed Endpoints
 
-Base prefix: `/ai`
-
-## 3.1 `POST /ai/search`
+## 3.1 `POST /parse-query`
 
 ### Purpose
-Primary product discovery and cross-platform comparison endpoint.
+Intelligence-layer endpoint that converts raw natural language into `FinalStructuredQuery`.
 
 ### Flow
 1. Validate payload (`SearchRequest`)
 2. Security + rate limit checks
-3. Cache lookup
-4. Run `AgentPipeline.run_search`
-5. Cache write-through
-6. Return `FinalResponse`
+3. Run `AgentPipeline.parse_query`
+4. Return strict machine-readable intelligence contract
 
 ---
 
-## 3.2 `POST /ai/recipe`
+## 3.2 `POST /search`
+
+### Purpose
+Primary execution endpoint for structured intelligence.
+
+### Flow
+1. Validate payload (`FinalStructuredQuery`)
+2. Security + rate limit checks
+3. Cache lookup
+4. Run graph-based execution with candidate path branching
+5. Evaluation-governed selection/retry loop
+6. Cache write-through
+7. Return `FinalResponse`
+
+---
+
+## 3.3 `POST /execute`
+
+### Purpose
+Strict alias of `/search` with identical contract (`FinalStructuredQuery` only).
+
+---
+
+## 3.4 `POST /recipe`
 
 ### Purpose
 Recipe planning to grocery mapping endpoint.
@@ -71,7 +90,7 @@ Recipe planning to grocery mapping endpoint.
 
 ---
 
-## 3.3 `POST /ai/cart-optimize`
+## 3.5 `POST /cart-optimization`
 
 ### Purpose
 Optimizes a list of items into lowest-cost split-order strategy.
@@ -147,7 +166,8 @@ Defined in `app/cache/redis_cache.py`.
 
 Routes call orchestrator methods:
 
-- `run_search(query)`
+- `parse_query(query)`
+- `run_search(final_structured_query)`
 - `run_recipe(query, servings)`
 - `run_cart_optimize(items)`
 
@@ -221,3 +241,28 @@ Relevant test files:
 
 These tests validate request validation, response shape, and route outcomes.
 
+
+## 14) Structured-only execution guarantees
+
+`/search` and `/execute` consume only `FinalStructuredQuery`.
+The contract includes `execution_graph`, `candidate_paths`, `learning_signals`, `evaluation_history`, and `failure_policies`, enabling adaptive execution without raw query leakage to execution agents.
+
+
+## Platform event intelligence endpoint
+
+### POST /platform-events
+Ingests real-time platform events into the AI intelligence layer.
+
+Accepted event types:
+- `user.behavior`
+- `order.created`
+- `inventory.updated`
+- `price.updated`
+
+Effects on execution:
+- updates shared memory and user model
+- influences parse/query planning via `platform_signals`
+- influences execution via live inventory/price adaptation
+- enriches response metadata with coordination and predictive context
+
+Structured query integration now includes `platform_signals` and `coordination_trace` fields in `FinalStructuredQuery`.
