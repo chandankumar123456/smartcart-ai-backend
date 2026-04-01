@@ -17,6 +17,10 @@ _PREFERENCE_KEYWORDS = {
     "premium": "premium",
     "fresh": "fresh",
 }
+_DEFAULT_RANKING_WEIGHTS = {"price": 0.4, "delivery": 0.3, "rating": 0.2, "discount": 0.1}
+_CHEAP_PRICE_WEIGHT = 0.6
+_HEALTHY_RATING_WEIGHT = 0.35
+_BASE_SERVINGS = 2.0
 
 
 class ConstraintExtractionAgent:
@@ -31,17 +35,22 @@ class ConstraintExtractionAgent:
         servings_match = _SERVINGS_PATTERN.search(q)
         servings = int(servings_match.group(1)) if servings_match else None
         words = set(clean_query.tokens)
-        preferences = list(dict.fromkeys(v for k, v in _PREFERENCE_KEYWORDS.items() if k in words))
+        preferences = []
+        seen_preferences = set()
+        for key, value in _PREFERENCE_KEYWORDS.items():
+            if key in words and value not in seen_preferences:
+                seen_preferences.add(value)
+                preferences.append(value)
 
         ranking_weights: Dict[str, float] = {}
         if "cheap" in preferences:
-            ranking_weights["price"] = 0.6
+            ranking_weights["price"] = _CHEAP_PRICE_WEIGHT
         if "organic" in preferences or "healthy" in preferences:
-            ranking_weights["rating"] = 0.35
+            ranking_weights["rating"] = _HEALTHY_RATING_WEIGHT
         if not ranking_weights:
-            ranking_weights = {"price": 0.4, "delivery": 0.3, "rating": 0.2, "discount": 0.1}
+            ranking_weights = _DEFAULT_RANKING_WEIGHTS.copy()
 
-        quantity_multiplier = float(servings) / 2.0 if servings and servings > 0 else 1.0
+        quantity_multiplier = float(servings) / _BASE_SERVINGS if servings and servings > 0 else 1.0
         return Constraints(
             budget=budget,
             servings=servings,

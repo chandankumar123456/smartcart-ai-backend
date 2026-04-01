@@ -14,9 +14,10 @@ _KNOWN_PRODUCTS = {
     "wheat flour",
 }
 _STOPWORDS = {"find", "show", "get", "buy", "need", "want", "for", "me", "the", "a", "an", "under", "above"}
+_DEFAULT_ENTITY_CONFIDENCE = 0.8
 
 
-def _extract_primary(q: str, intent: QueryIntent) -> Tuple[str, List[str]]:
+def _extract_primary(q: str, tokens: List[str], intent: QueryIntent) -> Tuple[str, List[str]]:
     if intent == QueryIntent.unsupported:
         return "", []
     if intent == QueryIntent.exploratory:
@@ -24,18 +25,28 @@ def _extract_primary(q: str, intent: QueryIntent) -> Tuple[str, List[str]]:
     for product in _KNOWN_PRODUCTS:
         if product in q:
             return product, []
-    tokens = [t for t in q.split() if t not in _STOPWORDS and not t.isdigit()]
-    if tokens:
-        return tokens[0], ["low_confidence_entity"]
+    filtered_tokens = [t for t in tokens if t not in _STOPWORDS and not t.isdigit()]
+    if filtered_tokens:
+        return filtered_tokens[0], ["low_confidence_entity"]
     return "", ["missing_entity"]
 
 
 class EntityExtractionAgent:
     async def run(self, clean_query: CleanQuery, intent_result: IntentResult) -> RawEntities:
-        primary, flags = _extract_primary(clean_query.normalized_text, intent_result.intent)
+        primary, flags = _extract_primary(
+            clean_query.normalized_text,
+            clean_query.tokens,
+            intent_result.intent,
+        )
         entities: List[RawEntity] = []
         if primary:
-            entities.append(RawEntity(text=primary, entity_type="product", confidence=0.8))
+            entities.append(
+                RawEntity(
+                    text=primary,
+                    entity_type="product",
+                    confidence=_DEFAULT_ENTITY_CONFIDENCE,
+                )
+            )
         return RawEntities(
             entities=entities,
             primary_entity=primary or None,

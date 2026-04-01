@@ -12,6 +12,11 @@ _NON_GROCERY_KEYWORDS = {
     "stocks", "crypto", "insurance", "car", "bike", "shoes", "shirt",
 }
 _GROCERY_CONTEXT = {"grocery", "groceries", "food", "ingredient", "ingredients", "milk", "rice", "bread", "eggs"}
+_UNSUPPORTED_CONFIDENCE = 0.95
+_RECIPE_CONFIDENCE = 0.88
+_CART_CONFIDENCE = 0.86
+_EXPLORATORY_CONFIDENCE = 0.74
+_DEFAULT_SEARCH_CONFIDENCE = 0.8
 
 
 class IntentDetectionAgent:
@@ -21,11 +26,11 @@ class IntentDetectionAgent:
         has_non_grocery = bool(words.intersection(_NON_GROCERY_KEYWORDS))
         has_grocery = bool(words.intersection(_GROCERY_CONTEXT))
         if has_non_grocery and not has_grocery:
-            return IntentResult(intent=QueryIntent.unsupported, confidence=0.95, notes="non-grocery query")
+            return IntentResult(intent=QueryIntent.unsupported, confidence=_UNSUPPORTED_CONFIDENCE, notes="non-grocery query")
         if any(k in q for k in _RECIPE_KEYWORDS):
-            return IntentResult(intent=QueryIntent.recipe, confidence=0.88, notes="recipe intent")
+            return IntentResult(intent=QueryIntent.recipe, confidence=_RECIPE_CONFIDENCE, notes="recipe intent")
         if any(k in q for k in _CART_KEYWORDS):
-            return IntentResult(intent=QueryIntent.cart_optimization, confidence=0.86, notes="cart optimization intent")
+            return IntentResult(intent=QueryIntent.cart_optimization, confidence=_CART_CONFIDENCE, notes="cart optimization intent")
         if any(k in words for k in _EXPLORATORY_KEYWORDS):
-            return IntentResult(intent=QueryIntent.exploratory, confidence=0.74, notes="exploratory intent")
-        return IntentResult(intent=QueryIntent.product_search, confidence=0.8, notes="default grocery search intent")
+            return IntentResult(intent=QueryIntent.exploratory, confidence=_EXPLORATORY_CONFIDENCE, notes="exploratory intent")
+        return IntentResult(intent=QueryIntent.product_search, confidence=_DEFAULT_SEARCH_CONFIDENCE, notes="default grocery search intent")

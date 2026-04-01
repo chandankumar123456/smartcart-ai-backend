@@ -112,6 +112,9 @@ _KEYWORD_FALLBACKS: Dict[str, Dict[str, Any]] = {
     "snack": {"canonical_name": "snacks", "possible_variants": ["chips", "biscuits", "namkeen"], "category": "snacks", "attributes": []},
     "salad": {"canonical_name": "salad", "possible_variants": ["salad leaves", "lettuce"], "category": "vegetable", "attributes": ["fresh"]},
 }
+_HIGH_NORMALIZATION_CONFIDENCE = 0.9
+_LOW_NORMALIZATION_CONFIDENCE = 0.65
+_UNRESOLVED_CONFIDENCE_THRESHOLD = 0.7
 
 
 def _fallback_normalization(term: str) -> Dict[str, Any]:
@@ -185,7 +188,11 @@ class NormalizationAgent:
         unresolved: List[str] = []
         for entity in raw_entities.entities:
             item = await self.run(entity.text)
-            confidence = 0.9 if item.category and item.category != "general" else 0.65
+            confidence = (
+                _HIGH_NORMALIZATION_CONFIDENCE
+                if item.category and item.category != "general"
+                else _LOW_NORMALIZATION_CONFIDENCE
+            )
             normalized.append(
                 NormalizedEntity(
                     raw_text=entity.text,
@@ -195,6 +202,6 @@ class NormalizationAgent:
                     confidence=confidence,
                 )
             )
-            if confidence < 0.7:
+            if confidence < _UNRESOLVED_CONFIDENCE_THRESHOLD:
                 unresolved.append(entity.text)
         return NormalizedEntities(entities=normalized, unresolved_entities=unresolved)

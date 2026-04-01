@@ -39,6 +39,7 @@ from app.data.models import (
     CartPlatformGroup,
     FinalStructuredQuery,
     FinalResponse,
+    NormalizedItem,
     QueryFilters,
     QueryMetadata,
     QueryIntent,
@@ -102,8 +103,9 @@ class AgentPipeline:
         fallback = await self._fallback_agent.run(normalized_entities, intent_result.intent)
         await self._query_logger.run("fallback", fallback.model_dump())
 
-        primary_entity = normalized_entities.entities[0].canonical_name if normalized_entities.entities else ""
-        category = normalized_entities.entities[0].category if normalized_entities.entities else "general"
+        primary_normalized_entity = normalized_entities.entities[0] if normalized_entities.entities else None
+        primary_entity = primary_normalized_entity.canonical_name if primary_normalized_entity else ""
+        category = primary_normalized_entity.category if primary_normalized_entity else "general"
         structured_query = StructuredQuery(
             product=primary_entity or clean_query.normalized_text or query,
             filters=QueryFilters(
@@ -158,8 +160,17 @@ class AgentPipeline:
         if sq.intent == QueryIntent.recipe:
             return await self.run_recipe(query)
 
-        normalized_term = sq.product or query
-        state["normalized_item"] = await self._normalization_agent.run(normalized_term)
+        if final_structured.normalized_entities.entities:
+            primary_normalized = final_structured.normalized_entities.entities[0]
+            state["normalized_item"] = NormalizedItem(
+                canonical_name=primary_normalized.canonical_name,
+                possible_variants=primary_normalized.possible_variants,
+                category=primary_normalized.category,
+                attributes=[],
+            )
+        else:
+            normalized_term = sq.product or query
+            state["normalized_item"] = await self._normalization_agent.run(normalized_term)
         state["unified_product"] = await self._product_agent.run(sq, state["normalized_item"])
         state["ranking_result"] = await self._ranking_agent.run(
             state["unified_product"],
