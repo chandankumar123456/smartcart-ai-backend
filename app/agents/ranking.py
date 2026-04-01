@@ -19,6 +19,7 @@ _WEIGHT_PRICE = 0.40
 _WEIGHT_DELIVERY = 0.30
 _WEIGHT_RATING = 0.20
 _WEIGHT_DISCOUNT = 0.10
+_PRICE_FIRST_THRESHOLD = 0.60
 
 
 def _score_product(
@@ -107,7 +108,21 @@ class RankingAgent:
             for p in products
             if p.in_stock
         ]
-        scored.sort(key=lambda x: x[1], reverse=True)
+        price_first = bool(
+            ranking_preferences
+            and float(ranking_preferences.get("price", 0.0)) >= _PRICE_FIRST_THRESHOLD
+        )
+        if price_first:
+            scored.sort(
+                key=lambda x: (
+                    x[0].price,
+                    x[0].delivery_time_minutes if x[0].delivery_time_minutes is not None else float("inf"),
+                    -(x[0].rating if x[0].rating is not None else 0.0),
+                    -(x[0].discount_percent if x[0].discount_percent is not None else 0.0),
+                )
+            )
+        else:
+            scored.sort(key=lambda x: x[1], reverse=True)
 
         ranked_list = [
             RankedProduct(

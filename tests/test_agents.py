@@ -254,6 +254,19 @@ class TestRankingAgent:
         ranks = [r.rank for r in result.ranked_list]
         assert ranks == [1, 2, 3]
 
+    @pytest.mark.asyncio
+    async def test_price_first_ranking_with_high_price_preference(self):
+        agent = RankingAgent()
+        products = [
+            self._make_product(Platform.blinkit, 32.0, 8, 4.8, 20.0),
+            self._make_product(Platform.zepto, 25.0, 25, 4.0, 0.0),
+            self._make_product(Platform.bigbasket, 25.0, 20, 3.8, 5.0),
+        ]
+        unified = UnifiedProduct(entity="milk", platforms=products)
+        result = await agent.run(unified, ranking_preferences={"price": 0.8, "delivery": 0.1, "rating": 0.05, "discount": 0.05})
+        assert result.ranked_list[0].product.price == 25.0
+        assert result.ranked_list[0].platform == Platform.bigbasket
+
 
 # ---------------------------------------------------------------------------
 # Deal Detection Agent
