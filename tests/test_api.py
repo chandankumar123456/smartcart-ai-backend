@@ -52,7 +52,7 @@ class TestHealthEndpoints:
         assert response.status_code == 200
         assert "javascript" in response.headers["content-type"]
         body = response.text
-        assert "window.open(safeUrl, \"_blank\")" in body
+        assert "window.open(safeUrl, \"_blank\", \"noopener,noreferrer\")" in body
         assert "Link not available" in body
 
     def test_ui_styles_served(self, client):

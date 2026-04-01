@@ -146,7 +146,7 @@
       button.disabled = !safeUrl;
       button.addEventListener("click", () => {
         if (safeUrl) {
-          window.open(safeUrl, "_blank");
+          window.open(safeUrl, "_blank", "noopener,noreferrer");
         }
       });
 
