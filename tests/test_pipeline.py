@@ -24,6 +24,9 @@ class TestSearchPipeline:
         assert isinstance(result.best_option, dict)
         assert isinstance(result.deals, list)
         assert isinstance(result.total_price, float)
+        assert "normalized_query" in result.metadata
+        assert "items" in result.metadata
+        assert "constraints" in result.metadata
 
     @pytest.mark.asyncio
     async def test_search_with_price_filter(self, pipeline):
@@ -44,6 +47,7 @@ class TestSearchPipeline:
         assert result.query == "xyz_unknown_product_123"
         assert result.results == []
         assert result.best_option == {}
+        assert result.metadata.get("intent") in {"product_search", "exploratory"}
 
     @pytest.mark.asyncio
     async def test_search_deals_detected_for_discounted_product(self, pipeline):
@@ -87,11 +91,20 @@ class TestSearchPipeline:
     async def test_search_evening_snacks_returns_results(self, pipeline):
         result = await pipeline.run_search("something for evening snacks")
         assert len(result.results) > 0
+        assert result.metadata.get("intent") == "exploratory"
 
     @pytest.mark.asyncio
     async def test_search_vague_multi_item_query_returns_results(self, pipeline):
         result = await pipeline.run_search("need paneer cubes and salad leaves for dinner")
         assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_unsupported_query_returns_structured_unsupported(self, pipeline):
+        result = await pipeline.run_search("book me a flight to mumbai")
+        assert result.results == []
+        assert result.best_option == {}
+        assert result.metadata.get("intent") == "unsupported"
+        assert "normalized_query" in result.metadata
 
 
 class TestRecipePipeline:
