@@ -17,6 +17,8 @@ from app.core.config import get_settings
 from app.data.database import ProductRecord, get_db_session
 from app.data.models import Platform, PlatformProduct, PriceHistory, PricePoint
 
+import logging
+
 # ---------------------------------------------------------------------------
 # Mock product catalogue — simulates the structured database output
 # ---------------------------------------------------------------------------
@@ -210,6 +212,7 @@ _TERM_TO_CATEGORY: Dict[str, str] = {
     "salad": "vegetable",
 }
 _settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 def _normalize(term: str) -> str:
@@ -282,6 +285,28 @@ def _record_to_platform_product(record: ProductRecord) -> Optional[PlatformProdu
     )
 
 
+def _api_fallback_item_to_product(item: Dict[str, Any]) -> Optional[PlatformProduct]:
+    platform = _platform_value(str(item.get("platform", "")))
+    if not platform:
+        return None
+    return PlatformProduct(
+        platform=platform,
+        product_id=str(item.get("product_id") or "").strip(),
+        name=str(item.get("name") or "").strip(),
+        normalized_name=str(item.get("normalized_name") or "").strip().lower(),
+        price=float(item.get("price") or 0.0),
+        original_price=item.get("original_price"),
+        discount_percent=item.get("discount_percent"),
+        unit=item.get("unit") or "",
+        rating=item.get("rating"),
+        delivery_time_minutes=item.get("delivery_time"),
+        in_stock=bool(item.get("in_stock", True)),
+        url=item.get("product_url"),
+        brand=item.get("brand"),
+        source="api",
+    )
+
+
 def save_products_to_db(products: List[Dict[str, Any]]) -> int:
     """Upsert products into DB preserving scraped URLs exactly as provided."""
     if not products:
@@ -331,6 +356,7 @@ def save_products_to_db(products: List[Dict[str, Any]]) -> int:
         return upserted
     except Exception:
         session.rollback()
+        logger.exception("Failed to save products to DB")
         return 0
     finally:
         if session is not None:
@@ -363,6 +389,7 @@ def _search_db_products(expanded_terms: List[str], category: Optional[str]) -> L
                 products.append(mapped)
         return products
     except Exception:
+        logger.exception("DB product search failed")
         return []
     finally:
         if session is not None:
@@ -422,6 +449,7 @@ def _fetch_api_fallback(entity: str) -> List[Dict[str, Any]]:
             if attempt < retries - 1:
                 time.sleep(backoff * (2 ** attempt))
             continue
+    logger.warning("API fallback failed after %s retries for entity=%s", retries, entity)
     return []
 
 
@@ -481,22 +509,11 @@ def match_products_for_entity(
     fallback_rows = _fetch_api_fallback(entity)
     if fallback_rows:
         save_products_to_db(fallback_rows)
-        api_products = [PlatformProduct(**_ensure_product_fields({
-            "platform": _platform_value(str(item["platform"])),
-            "product_id": item["product_id"],
-            "name": item["name"],
-            "normalized_name": item["normalized_name"],
-            "price": item["price"],
-            "original_price": item.get("original_price"),
-            "discount_percent": item.get("discount_percent"),
-            "unit": item.get("unit") or "",
-            "rating": item.get("rating"),
-            "delivery_time_minutes": item.get("delivery_time"),
-            "in_stock": item.get("in_stock", True),
-            "url": item.get("product_url"),
-            "brand": item.get("brand"),
-            "source": "api",
-        })) for item in fallback_rows if _platform_value(str(item["platform"])) is not None]
+        api_products = []
+        for item in fallback_rows:
+            mapped = _api_fallback_item_to_product(item)
+            if mapped:
+                api_products.append(mapped)
         if api_products:
             return (
                 api_products,

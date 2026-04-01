@@ -7,11 +7,13 @@ from typing import Any, Dict, List
 
 import httpx
 from bs4 import BeautifulSoup
+import logging
 
 from app.core.config import get_settings
 from app.data.layer import save_products_to_db
 
 _settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 def _extract_from_html(html: str) -> List[Dict[str, Any]]:
@@ -69,6 +71,7 @@ def scrape_blinkit_products(category: str) -> List[Dict[str, Any]]:
         response.raise_for_status()
         return _extract_from_html(response.text)
     except Exception:
+        logger.exception("Blinkit scrape failed for category=%s", category)
         return []
 
 
@@ -76,4 +79,3 @@ def run_blinkit_scrape(category: str) -> int:
     """Trigger scrape and store records in DB."""
     rows = scrape_blinkit_products(category)
     return save_products_to_db(rows)
-
