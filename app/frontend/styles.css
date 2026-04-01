@@ -29,6 +29,25 @@ body {
   margin-bottom: 28px;
 }
 
+.workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.workflow-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.workflow-card h2 {
+  margin-top: 0;
+  font-size: 1.05rem;
+}
+
 .hero h1 {
   margin: 0;
   font-size: clamp(1.8rem, 3.5vw, 2.5rem);
@@ -42,9 +61,8 @@ body {
 .search-wrap {
   display: flex;
   gap: 12px;
-  justify-content: center;
-  max-width: 760px;
-  margin: 0 auto;
+  align-items: center;
+  width: 100%;
 }
 
 .search-input {
@@ -72,11 +90,25 @@ body {
   padding: 0 20px;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
 }
 
-.search-btn:hover { transform: translateY(-1px); }
+.search-btn:hover { transform: translateY(-1px) scale(1.02); box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28); }
 .search-btn:active { transform: translateY(0); opacity: 0.9; }
+.search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.servings-input {
+  max-width: 96px;
+}
+
+.cart-wrap {
+  align-items: flex-start;
+}
+
+.cart-items-input {
+  min-height: 92px;
+  resize: vertical;
+}
 
 .section-title-row {
   display: flex;
@@ -105,7 +137,7 @@ body {
 
 .card.best {
   border: 2px solid var(--success);
-  transform: scale(1.02);
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.18), var(--shadow);
 }
 
 .best-label {
@@ -180,11 +212,17 @@ body {
   color: #fff;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
 }
 
-.cta:hover { transform: translateY(-1px); }
+.cta:hover { transform: translateY(-1px) scale(1.02); box-shadow: 0 6px 16px rgba(15, 23, 42, 0.24); }
 .cta:active { transform: translateY(0); opacity: 0.9; }
+.cta:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
 
 .deals-list {
   display: grid;
@@ -209,6 +247,12 @@ body {
   border-radius: 16px;
   padding: 24px;
   color: #334155;
+}
+
+.stack-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
 }
 
 .skeleton {
@@ -253,8 +297,12 @@ body {
 @media (max-width: 720px) {
   .search-wrap {
     flex-direction: column;
+    align-items: stretch;
   }
   .search-btn {
     height: 48px;
+  }
+  .servings-input {
+    max-width: none;
   }
 }

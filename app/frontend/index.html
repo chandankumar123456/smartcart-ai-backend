@@ -10,19 +10,63 @@
   <main class="page">
     <section class="hero">
       <h1>SmartCart Grocery Intelligence</h1>
-      <p class="subtitle">Compare groceries across platforms and choose confidently.</p>
-      <form id="search-form" class="search-wrap" aria-label="Grocery intelligence search">
-        <input
-          id="query-input"
-          class="search-input"
-          type="text"
-          name="query"
-          placeholder='Try "cheap wheat flour under 150" or "best rice for biryani"'
-          autocomplete="off"
-          required
-        />
-        <button id="search-btn" class="search-btn" type="submit">Search</button>
-      </form>
+      <p class="subtitle">Validation UI for search, recipe planning, cart optimization, deals, and AI intelligence.</p>
+    </section>
+
+    <section class="workflow-grid">
+      <article class="workflow-card">
+        <h2>Search</h2>
+        <form id="search-form" class="search-wrap" aria-label="Grocery intelligence search">
+          <input
+            id="query-input"
+            class="search-input"
+            type="text"
+            name="query"
+            placeholder='Try "cheap wheat flour under 150"'
+            autocomplete="off"
+            required
+          />
+          <button id="search-btn" class="search-btn" type="submit">Run Search</button>
+        </form>
+      </article>
+
+      <article class="workflow-card">
+        <h2>Recipe</h2>
+        <form id="recipe-form" class="search-wrap" aria-label="Recipe query form">
+          <input
+            id="recipe-query-input"
+            class="search-input"
+            type="text"
+            name="recipe-query"
+            placeholder='Try "tomato pasta"'
+            autocomplete="off"
+            required
+          />
+          <input
+            id="recipe-servings-input"
+            class="search-input servings-input"
+            type="number"
+            min="1"
+            max="20"
+            value="2"
+            required
+          />
+          <button id="recipe-btn" class="search-btn" type="submit">Run Recipe</button>
+        </form>
+      </article>
+
+      <article class="workflow-card">
+        <h2>Cart Optimization</h2>
+        <form id="cart-form" class="search-wrap cart-wrap" aria-label="Cart optimization form">
+          <textarea
+            id="cart-items-input"
+            class="search-input cart-items-input"
+            placeholder="milk,1&#10;bread,2&#10;rice,1"
+            required
+          ></textarea>
+          <button id="cart-btn" class="search-btn" type="submit">Optimize Cart</button>
+        </form>
+      </article>
     </section>
 
     <section id="loading-skeleton" class="skeleton hidden" aria-live="polite">
@@ -31,29 +75,47 @@
       <div class="skeleton-line"></div>
     </section>
 
-    <section id="no-results" class="empty-state hidden" aria-live="polite">
-      <h2>No products found within budget</h2>
-      <p>Try widening your budget, product keywords, or preferences.</p>
+    <section id="empty-state" class="empty-state hidden" aria-live="polite">
+      <h2>🧺 No data yet</h2>
+      <p>Run any workflow above to inspect backend behavior.</p>
     </section>
 
     <section id="results-section" class="results hidden" aria-live="polite">
       <div class="section-title-row">
-        <h2>Comparison Results</h2>
+        <h2>Results</h2>
       </div>
       <div id="results-grid" class="results-grid"></div>
     </section>
 
+    <section id="recipe-results-section" class="results hidden" aria-live="polite">
+      <div class="section-title-row">
+        <h2>Recipe Flow</h2>
+      </div>
+      <div id="recipe-results-list" class="stack-list"></div>
+    </section>
+
+    <section id="cart-results-section" class="results hidden" aria-live="polite">
+      <div class="section-title-row">
+        <h2>Cart Optimization</h2>
+      </div>
+      <div id="cart-results-list" class="stack-list"></div>
+    </section>
+
     <section id="deals-section" class="deals hidden" aria-live="polite">
-      <h2>Top Deals</h2>
+      <h2>Deals / Insights</h2>
       <div id="deals-list" class="deals-list"></div>
     </section>
 
     <details id="debug-panel" class="debug-panel hidden">
-      <summary>Query Insight</summary>
+      <summary>Debug / Intelligence Panel</summary>
       <div class="debug-body">
         <p><strong>Interpreted query:</strong> <span id="debug-query">-</span></p>
-        <p><strong>Detected intent:</strong> <span id="debug-intent">-</span></p>
+        <p><strong>Intent:</strong> <span id="debug-intent">-</span></p>
         <p><strong>Constraints:</strong> <span id="debug-constraints">-</span></p>
+        <p><strong>Secondary intents:</strong> <span id="debug-secondary-intents">-</span></p>
+        <p><strong>Execution mode:</strong> <span id="debug-execution-mode">-</span></p>
+        <p><strong>Candidate paths:</strong> <span id="debug-candidate-paths">-</span></p>
+        <p><strong>AI signals:</strong> <span id="debug-signals">-</span></p>
       </div>
     </details>
   </main>

@@ -41,16 +41,25 @@ class TestHealthEndpoints:
         response = client.get("/ui")
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
+        body = response.text
+        assert 'id="search-form"' in body
+        assert 'id="recipe-form"' in body
+        assert 'id="cart-form"' in body
+        assert "Debug / Intelligence Panel" in body
 
     def test_ui_assets_served(self, client):
         response = client.get("/ui-assets/app.js")
         assert response.status_code == 200
         assert "javascript" in response.headers["content-type"]
+        body = response.text
+        assert "window.open(safeUrl, \"_blank\")" in body
+        assert "Link not available" in body
 
     def test_ui_styles_served(self, client):
         response = client.get("/ui-assets/styles.css")
         assert response.status_code == 200
         assert "text/css" in response.headers["content-type"]
+        assert ".workflow-grid" in response.text
 
 
 class TestSearchEndpoint:
