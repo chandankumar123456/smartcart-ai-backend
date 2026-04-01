@@ -21,6 +21,7 @@ _DEFAULT_RANKING_WEIGHTS = {"price": 0.4, "delivery": 0.3, "rating": 0.2, "disco
 _CHEAP_PRICE_WEIGHT = 0.6
 _HEALTHY_RATING_WEIGHT = 0.35
 _BASE_SERVINGS = 2.0
+_CONFLICTING_PREFERENCE_PAIRS = {("cheap", "premium")}
 
 
 class ConstraintExtractionAgent:
@@ -50,6 +51,12 @@ class ConstraintExtractionAgent:
         if not ranking_weights:
             ranking_weights = _DEFAULT_RANKING_WEIGHTS.copy()
 
+        conflict_notes = []
+        pref_set = set(preferences)
+        for left, right in _CONFLICTING_PREFERENCE_PAIRS:
+            if left in pref_set and right in pref_set:
+                conflict_notes.append(f"conflicting_preferences:{left}_vs_{right}")
+
         quantity_multiplier = float(servings) / _BASE_SERVINGS if servings and servings > 0 else 1.0
         return Constraints(
             budget=budget,
@@ -57,4 +64,5 @@ class ConstraintExtractionAgent:
             preferences=preferences,
             inferred_quantity_multiplier=quantity_multiplier,
             ranking_preference_weights=ranking_weights,
+            conflict_notes=conflict_notes,
         )

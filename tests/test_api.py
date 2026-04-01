@@ -39,8 +39,14 @@ class TestHealthEndpoints:
 
 
 class TestSearchEndpoint:
+    def _parse_payload(self, client, query: str):
+        response = client.post("/parse-query", json={"query": query})
+        assert response.status_code == 200
+        return response.json()
+
     def test_search_valid_query(self, client):
-        response = client.post("/search", json={"query": "milk"})
+        payload = self._parse_payload(client, "milk")
+        response = client.post("/search", json=payload)
         assert response.status_code == 200
         data = response.json()
         assert data["query"] == "milk"
@@ -50,59 +56,67 @@ class TestSearchEndpoint:
         assert "total_price" in data
 
     def test_search_empty_query_rejected(self, client):
-        response = client.post("/search", json={"query": ""})
-        assert response.status_code == 422
-
-    def test_search_missing_query_rejected(self, client):
         response = client.post("/search", json={})
         assert response.status_code == 422
 
+    def test_search_missing_query_rejected(self, client):
+        response = client.post("/search", json={"foo": "bar"})
+        assert response.status_code == 422
+
     def test_search_with_price_filter_query(self, client):
-        response = client.post("/search", json={"query": "milk under 30"})
+        payload = self._parse_payload(client, "milk under 30")
+        response = client.post("/search", json=payload)
         assert response.status_code == 200
         data = response.json()
         for r in data["results"]:
             assert r["price"] <= 30.0
 
     def test_search_rice_has_results(self, client):
-        response = client.post("/search", json={"query": "rice"})
+        payload = self._parse_payload(client, "rice")
+        response = client.post("/search", json=payload)
         assert response.status_code == 200
         data = response.json()
         assert len(data["results"]) > 0
 
     def test_search_generic_chicken_has_results(self, client):
-        response = client.post("/search", json={"query": "chicken"})
+        payload = self._parse_payload(client, "chicken")
+        response = client.post("/search", json=payload)
         assert response.status_code == 200
         data = response.json()
         assert len(data["results"]) > 0
 
     def test_search_generic_curd_alias_has_results(self, client):
-        response = client.post("/search", json={"query": "dahi"})
+        payload = self._parse_payload(client, "dahi")
+        response = client.post("/search", json=payload)
         assert response.status_code == 200
         data = response.json()
         assert len(data["results"]) > 0
 
     def test_search_capsicum_has_results(self, client):
-        response = client.post("/search", json={"query": "capsicum"})
+        payload = self._parse_payload(client, "capsicum")
+        response = client.post("/search", json=payload)
         assert response.status_code == 200
         data = response.json()
         assert len(data["results"]) > 0
 
     def test_search_paneer_cubes_has_results(self, client):
-        response = client.post("/search", json={"query": "paneer cubes"})
+        payload = self._parse_payload(client, "paneer cubes")
+        response = client.post("/search", json=payload)
         assert response.status_code == 200
         data = response.json()
         assert len(data["results"]) > 0
 
     def test_search_evening_snacks_has_results(self, client):
-        response = client.post("/search", json={"query": "something for evening snacks"})
+        payload = self._parse_payload(client, "something for evening snacks")
+        response = client.post("/search", json=payload)
         assert response.status_code == 200
         data = response.json()
         assert len(data["results"]) > 0
         assert data["metadata"]["intent"] == "exploratory"
 
     def test_search_unsupported_query(self, client):
-        response = client.post("/search", json={"query": "best laptop under 50000"})
+        payload = self._parse_payload(client, "best laptop under 50000")
+        response = client.post("/search", json=payload)
         assert response.status_code == 200
         data = response.json()
         assert data["results"] == []
@@ -118,8 +132,17 @@ class TestSearchEndpoint:
         assert "normalized_entities" in data
         assert "constraints" in data
         assert "domain_guard" in data
+        assert "ambiguity" in data
         assert "fallback" in data
+        assert "execution_plan" in data
         assert "structured_query" in data
+
+    def test_parse_query_multi_intent_contains_secondary_intents(self, client):
+        response = client.post("/parse-query", json={"query": "plan pasta and optimize my cart"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["intent_result"]["intent"] == "recipe"
+        assert "cart_optimization" in data["intent_result"]["secondary_intents"]
 
 
 class TestRecipeEndpoint:

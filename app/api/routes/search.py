@@ -54,19 +54,20 @@ async def parse_query(
     ),
 )
 async def search(
-    body: SearchRequest,
+    body: FinalStructuredQuery,
     request: Request,
     _api_key: str = Depends(verify_api_key),
 ) -> FinalResponse:
     check_rate_limit(request)
     cache = get_cache()
-    cached = await cache.get("search", body.query)
+    cache_key = body.structured_query.normalized_query or body.clean_query.normalized_text
+    cached = await cache.get("search", cache_key)
     if cached:
-        logger.debug("Cache hit for query: %s", body.query)
+        logger.debug("Cache hit for query: %s", cache_key)
         return FinalResponse(**cached)
 
     pipeline = get_pipeline()
-    result = await pipeline.run_search(body.query)
+    result = await pipeline.run_search(body)
 
-    await cache.set("search", body.query, result.model_dump())
+    await cache.set("search", cache_key, result.model_dump())
     return result

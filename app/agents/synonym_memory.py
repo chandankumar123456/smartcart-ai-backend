@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 
 class SynonymMemoryAgent:
@@ -10,6 +10,7 @@ class SynonymMemoryAgent:
 
     def __init__(self) -> None:
         self._memory: Dict[str, str] = {}
+        self._reverse: Dict[str, List[str]] = {}
 
     async def lookup(self, term: str) -> Optional[str]:
         return self._memory.get(term.strip().lower())
@@ -19,3 +20,10 @@ class SynonymMemoryAgent:
         canonical = canonical_name.strip().lower()
         if raw and canonical:
             self._memory[raw] = canonical
+            aliases = self._reverse.get(canonical, [])
+            if raw not in aliases:
+                aliases.append(raw)
+            self._reverse[canonical] = aliases
+
+    async def aliases_for(self, canonical_name: str) -> List[str]:
+        return list(self._reverse.get(canonical_name.strip().lower(), []))

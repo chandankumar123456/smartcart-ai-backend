@@ -13,7 +13,7 @@ _KNOWN_PRODUCTS = {
     "snacks", "salad", "ginger", "lentils", "cumin seeds", "red chili powder",
     "wheat flour",
 }
-_STOPWORDS = {"find", "show", "get", "buy", "need", "want", "for", "me", "the", "a", "an", "under", "above"}
+_STOPWORDS = {"find", "show", "get", "buy", "need", "want", "for", "me", "the", "a", "an"}
 _DEFAULT_ENTITY_CONFIDENCE = 0.8
 
 
@@ -38,6 +38,14 @@ class EntityExtractionAgent:
             clean_query.tokens,
             intent_result.intent,
         )
+        candidate_entities = []
+        if " and " in clean_query.normalized_text:
+            for token in clean_query.normalized_text.split(" and "):
+                token = token.strip()
+                if any(product in token for product in _KNOWN_PRODUCTS):
+                    candidate_entities.append(token)
+        if primary and primary not in candidate_entities:
+            candidate_entities.insert(0, primary)
         entities: List[RawEntity] = []
         if primary:
             entities.append(
@@ -51,4 +59,5 @@ class EntityExtractionAgent:
             entities=entities,
             primary_entity=primary or None,
             ambiguity_flags=flags,
+            candidate_entities=candidate_entities,
         )

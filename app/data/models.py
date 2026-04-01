@@ -69,6 +69,7 @@ class IntentResult(BaseModel):
     intent: QueryIntent
     confidence: float = 0.0
     notes: str = ""
+    secondary_intents: List[QueryIntent] = Field(default_factory=list)
 
 
 class RawEntity(BaseModel):
@@ -81,6 +82,7 @@ class RawEntities(BaseModel):
     entities: List[RawEntity] = Field(default_factory=list)
     primary_entity: Optional[str] = None
     ambiguity_flags: List[str] = Field(default_factory=list)
+    candidate_entities: List[str] = Field(default_factory=list)
 
 
 class NormalizedEntity(BaseModel):
@@ -102,6 +104,7 @@ class Constraints(BaseModel):
     preferences: List[str] = Field(default_factory=list)
     inferred_quantity_multiplier: float = 1.0
     ranking_preference_weights: Dict[str, float] = Field(default_factory=dict)
+    conflict_notes: List[str] = Field(default_factory=list)
 
 
 class DomainGuardResult(BaseModel):
@@ -115,6 +118,19 @@ class FallbackDecision(BaseModel):
     mode: str = "none"
     reason: str = ""
     alternatives: List[str] = Field(default_factory=list)
+
+
+class AmbiguityDecision(BaseModel):
+    needs_resolution: bool = False
+    resolution_strategy: str = "none"
+    candidate_entities: List[str] = Field(default_factory=list)
+    confidence: float = 1.0
+
+
+class ExecutionPlan(BaseModel):
+    mode: str = "search_only"
+    steps: List[str] = Field(default_factory=list)
+    reason: str = ""
 
 
 class StructuredQuery(BaseModel):
@@ -146,7 +162,9 @@ class FinalStructuredQuery(BaseModel):
     normalized_entities: NormalizedEntities
     constraints: Constraints
     domain_guard: DomainGuardResult
+    ambiguity: AmbiguityDecision = Field(default_factory=AmbiguityDecision)
     fallback: FallbackDecision
+    execution_plan: ExecutionPlan = Field(default_factory=ExecutionPlan)
     structured_query: StructuredQuery
 
 

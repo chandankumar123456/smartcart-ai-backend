@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from app.data.models import (
+    AmbiguityDecision,
     Constraints,
     DomainGuardResult,
+    ExecutionPlan,
     FinalStructuredQuery,
     FallbackDecision,
     IntentResult,
@@ -24,7 +26,9 @@ class OutputFormatterAgent:
         normalized_entities: NormalizedEntities,
         constraints: Constraints,
         domain_guard: DomainGuardResult,
+        ambiguity: AmbiguityDecision,
         fallback: FallbackDecision,
+        execution_plan: ExecutionPlan,
         structured_query: StructuredQuery,
     ) -> FinalStructuredQuery:
         return FinalStructuredQuery(
@@ -34,6 +38,8 @@ class OutputFormatterAgent:
             normalized_entities=normalized_entities,
             constraints=constraints,
             domain_guard=domain_guard,
+            ambiguity=ambiguity,
             fallback=fallback,
+            execution_plan=execution_plan,
             structured_query=structured_query,
         )

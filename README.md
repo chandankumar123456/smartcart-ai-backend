@@ -94,26 +94,37 @@ User → CDN → Load Balancer → FastAPI Backend → AI System → Database/Ca
 
 ## 4) Multi-Agent Pipeline
 
-### Intelligence + Execution Pipeline
+### Adaptive Intelligence + Execution Pipeline
 
 ```text
 User Query
   → LanguageProcessingAgent
   → IntentDetectionAgent
+      ↳ multi-intent detection (primary + secondary intents)
   → EntityExtractionAgent
+      ↳ candidate entities (ambiguity preserved)
   → NormalizationAgent
+      ↳ synonym memory + alias expansion
   → ConstraintExtractionAgent
+      ↳ budget/servings/preferences/conflict analysis
   → DomainGuardAgent
+  → AmbiguityReasoningAgent
+  → ExecutionPlannerAgent (adaptive routing)
   → FallbackAgent
   → OutputFormatterAgent
   → (FinalStructuredQuery complete)
-  → ProductMatchingAgent
-  → RankingAgent
-  → DealDetectionAgent
+  → Execution Layer (structured input only)
+      ↳ ProductMatchingAgent
+      ↳ RankingAgent (constraint-weight aware)
+      ↳ DealDetectionAgent
   → ResponseBuilder
 ```
 
-Guarantee: execution never starts before `FinalStructuredQuery` is finalized.
+Guarantees:
+- execution never starts before `FinalStructuredQuery` is finalized
+- execution never consumes raw query text
+- ambiguity can be preserved with delayed resolution strategy
+- multi-intent can produce adaptive execution plans
 
 ### Recipe Pipeline
 
@@ -166,13 +177,22 @@ Request:
 ```
 
 ### `POST /search`
-Execution-layer endpoint. Internally runs `/parse-query` stage first, then matching/ranking/deals.
+Execution-layer endpoint. Accepts **FinalStructuredQuery only** and executes matching/ranking/deals from structured intelligence.
 
 Request:
 
 ```json
 {
-  "query": "cheap milk under 35"
+  "clean_query": { "...": "..." },
+  "intent_result": { "...": "..." },
+  "raw_entities": { "...": "..." },
+  "normalized_entities": { "...": "..." },
+  "constraints": { "...": "..." },
+  "domain_guard": { "...": "..." },
+  "ambiguity": { "...": "..." },
+  "fallback": { "...": "..." },
+  "execution_plan": { "...": "..." },
+  "structured_query": { "...": "..." }
 }
 ```
 
@@ -219,7 +239,9 @@ All intelligence stages use explicit machine-consumable schemas from `app/data/m
 - `NormalizedEntities`: canonical entities + unresolved entity list.
 - `Constraints`: budget/servings/preferences + ranking preference weights.
 - `DomainGuardResult`: allow/block decision with confidence and reason.
+- `AmbiguityDecision`: candidate entities + delayed-resolution strategy.
 - `FallbackDecision`: fallback mode/reason/alternatives.
+- `ExecutionPlan`: adaptive execution routing steps and reason.
 - `FinalStructuredQuery`: all intelligence outputs + `StructuredQuery`.
 
 `/parse-query` returns `FinalStructuredQuery` directly.
@@ -235,9 +257,11 @@ All intelligence stages use explicit machine-consumable schemas from `app/data/m
 - `ConstraintExtractionAgent` — budget/servings/preferences extraction.
 - `DomainGuardAgent` — grocery-domain safety gating.
 - `FallbackAgent` — ambiguity/exploratory fallback strategy.
+- `AmbiguityReasoningAgent` — delayed-resolution decisioning for ambiguous queries.
+- `ExecutionPlannerAgent` — dynamic route planning for multi-intent execution.
 - `OutputFormatterAgent` — final strict structured output assembly.
 - `SynonymMemoryAgent` — remembers raw-term → canonical mappings.
-- `QueryLoggingAgent` — stage-wise structured observability logs.
+- `QueryLoggingAgent` — stage-wise structured observability + learning/failure counters.
 
 ---
 
@@ -245,8 +269,11 @@ All intelligence stages use explicit machine-consumable schemas from `app/data/m
 
 - No raw entities are sent to matching/ranking.
 - No execution before structured intelligence is finalized.
+- `/search` requires `FinalStructuredQuery` (execution-only contract).
 - Unsupported domain queries are blocked by domain guard with structured metadata.
 - Exploratory/vague queries are handled via fallback mode with alternatives.
+- Multi-intent queries produce adaptive execution plans.
+- Learning loop updates synonym memory from successful parsing outcomes.
 - Structured output remains deterministic JSON across all endpoints.
 
 ---

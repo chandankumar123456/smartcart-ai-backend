@@ -20,7 +20,9 @@ from typing import Any, Dict, List, Optional
 from app.agents.constraint_extraction import ConstraintExtractionAgent
 from app.agents.deal_detection import DealDetectionAgent
 from app.agents.domain_guard import DomainGuardAgent
+from app.agents.ambiguity_reasoning import AmbiguityReasoningAgent
 from app.agents.entity_extraction import EntityExtractionAgent
+from app.agents.execution_planner import ExecutionPlannerAgent
 from app.agents.intent_detection import IntentDetectionAgent
 from app.agents.language_processing import LanguageProcessingAgent
 from app.agents.fallback import FallbackAgent
@@ -48,6 +50,7 @@ from app.data.models import (
     StructuredItem,
     StructuredQuery,
 )
+from app.learning.feedback import LearningLoop
 from app.llm.manager import LLMManager, get_llm_manager
 from app.response.builder import ResponseBuilder
 
@@ -70,6 +73,8 @@ class AgentPipeline:
         self._entity_agent = EntityExtractionAgent()
         self._constraint_agent = ConstraintExtractionAgent()
         self._domain_guard_agent = DomainGuardAgent()
+        self._ambiguity_agent = AmbiguityReasoningAgent()
+        self._execution_planner_agent = ExecutionPlannerAgent()
         self._fallback_agent = FallbackAgent()
         self._formatter_agent = OutputFormatterAgent()
         self._query_logger = QueryLoggingAgent()
@@ -80,6 +85,7 @@ class AgentPipeline:
         self._deal_agent = DealDetectionAgent()
         self._recipe_agent = RecipeAgent(llm)
         self._builder = ResponseBuilder()
+        self._learning_loop = LearningLoop(self._synonym_memory)
 
     # ------------------------------------------------------------------
     # Public entry points
@@ -100,8 +106,12 @@ class AgentPipeline:
         await self._query_logger.run("constraint_extraction", constraints.model_dump())
         domain_guard = await self._domain_guard_agent.run(clean_query, intent_result)
         await self._query_logger.run("domain_guard", domain_guard.model_dump())
+        ambiguity = await self._ambiguity_agent.run(intent_result, raw_entities, normalized_entities)
+        await self._query_logger.run("ambiguity_reasoning", ambiguity.model_dump())
         fallback = await self._fallback_agent.run(normalized_entities, intent_result.intent)
         await self._query_logger.run("fallback", fallback.model_dump())
+        execution_plan = await self._execution_planner_agent.run(intent_result)
+        await self._query_logger.run("execution_planning", execution_plan.model_dump())
 
         primary_normalized_entity = normalized_entities.entities[0] if normalized_entities.entities else None
         primary_entity = primary_normalized_entity.canonical_name if primary_normalized_entity else ""
@@ -136,18 +146,20 @@ class AgentPipeline:
             normalized_entities=normalized_entities,
             constraints=constraints,
             domain_guard=domain_guard,
+            ambiguity=ambiguity,
             fallback=fallback,
+            execution_plan=execution_plan,
             structured_query=structured_query,
         )
         await self._query_logger.run("output_formatter", final_structured.model_dump())
+        await self._learning_loop.learn_from_success(final_structured)
         state["final_structured_query"] = final_structured
         return final_structured
 
-    async def run_search(self, query: str) -> FinalResponse:
-        """Execute search execution layer after strict parse-query stage."""
-        logger.debug("[ENTRY] endpoint=/search query=%s type=search_execution", query)
-        state: Dict[str, Any] = {"raw_query": query}
-        final_structured = await self.parse_query(query)
+    async def run_search(self, final_structured: FinalStructuredQuery) -> FinalResponse:
+        """Execute search only from finalized structured intelligence."""
+        logger.debug("[ENTRY] endpoint=/search type=search_execution_structured")
+        state: Dict[str, Any] = {"raw_query": final_structured.clean_query.text}
         state["final_structured_query"] = final_structured
         state["structured_query"] = final_structured.structured_query
 
@@ -157,8 +169,12 @@ class AgentPipeline:
         sq: StructuredQuery = state["structured_query"]
         if sq.intent == QueryIntent.unsupported:
             return self._builder.build_unsupported_response(state)
-        if sq.intent == QueryIntent.recipe:
-            return await self.run_recipe(query)
+        if final_structured.execution_plan.mode in {"recipe_only", "recipe_then_cart_optimization"}:
+            response = await self.run_recipe(final_structured.clean_query.text)
+            if final_structured.execution_plan.mode == "recipe_then_cart_optimization":
+                response.metadata["secondary_intents"] = [i.value for i in final_structured.intent_result.secondary_intents]
+                response.metadata["execution_plan"] = final_structured.execution_plan.model_dump()
+            return response
 
         if final_structured.normalized_entities.entities:
             primary_normalized = final_structured.normalized_entities.entities[0]
@@ -169,7 +185,7 @@ class AgentPipeline:
                 attributes=[],
             )
         else:
-            normalized_term = sq.product or query
+            normalized_term = sq.product or final_structured.clean_query.text
             state["normalized_item"] = await self._normalization_agent.run(normalized_term)
         state["unified_product"] = await self._product_agent.run(sq, state["normalized_item"])
         state["ranking_result"] = await self._ranking_agent.run(

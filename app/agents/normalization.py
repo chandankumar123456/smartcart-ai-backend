@@ -186,8 +186,13 @@ class NormalizationAgent:
     async def run_entities(self, raw_entities: RawEntities) -> NormalizedEntities:
         normalized: List[NormalizedEntity] = []
         unresolved: List[str] = []
-        for entity in raw_entities.entities:
-            item = await self.run(entity.text)
+        candidate_terms = [e.text for e in raw_entities.entities] + list(raw_entities.candidate_entities)
+        deduped_terms = list(dict.fromkeys(t.strip() for t in candidate_terms if t and t.strip()))
+        for term in deduped_terms:
+            entity_text = term
+            item = await self.run(entity_text)
+            aliases = await self._synonym_memory.aliases_for(item.canonical_name)
+            variants = list(dict.fromkeys(item.possible_variants + aliases))
             confidence = (
                 _HIGH_NORMALIZATION_CONFIDENCE
                 if item.category and item.category != "general"
@@ -195,13 +200,13 @@ class NormalizationAgent:
             )
             normalized.append(
                 NormalizedEntity(
-                    raw_text=entity.text,
+                    raw_text=entity_text,
                     canonical_name=item.canonical_name,
                     category=item.category,
-                    possible_variants=item.possible_variants,
+                    possible_variants=variants,
                     confidence=confidence,
                 )
             )
             if confidence < _UNRESOLVED_CONFIDENCE_THRESHOLD:
-                unresolved.append(entity.text)
+                unresolved.append(entity_text)
         return NormalizedEntities(entities=normalized, unresolved_entities=unresolved)
