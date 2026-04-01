@@ -78,6 +78,7 @@ class ResponseBuilder:
                     "platform": ranked.platform.value,
                     "product_id": ranked.product.product_id,
                     "name": ranked.product.name,
+                    "brand": ranked.product.brand,
                     "price": ranked.product.price,
                     "original_price": ranked.product.original_price,
                     "discount_percent": ranked.product.discount_percent,
@@ -86,6 +87,8 @@ class ResponseBuilder:
                     "delivery_time_minutes": ranked.product.delivery_time_minutes,
                     "in_stock": ranked.product.in_stock,
                     "url": ranked.product.url,
+                    "link_status": "available" if ranked.product.url else "link unavailable",
+                    "source": ranked.product.source,
                     "score": ranked.score,
                     "rank": ranked.rank,
                 })
@@ -97,12 +100,15 @@ class ResponseBuilder:
                 "platform": bo.platform.value,
                 "product_id": bo.product.product_id,
                 "name": bo.product.name,
+                "brand": bo.product.brand,
                 "price": bo.product.price,
                 "unit": bo.product.unit,
                 "delivery_time_minutes": bo.product.delivery_time_minutes,
                 "rating": bo.product.rating,
                 "discount_percent": bo.product.discount_percent,
                 "url": bo.product.url,
+                "link_status": "available" if bo.product.url else "link unavailable",
+                "source": bo.product.source,
                 "score": bo.score,
             }
 

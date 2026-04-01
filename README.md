@@ -1,435 +1,239 @@
-# SmartCart AI Backend
-
-SmartCart AI Backend is a **multi-agent grocery intelligence system** built with FastAPI.  
-It converts natural-language grocery queries into structured decisions: price comparison, best option ranking, deal detection, recipe-to-cart mapping, and cart cost optimization across multiple platforms.
-
----
-
-## 1) Project Scope
-
-This backend implements:
-
-- **AI Logic (Multi-Agent System)**  
-  Query understanding, product matching, ranking, deal detection, recipe planning, cart optimization.
-- **AI Backend (FastAPI + Orchestration)**  
-  API endpoints, orchestration, LLM management, cache layer, queue workers, security layer, and standardized JSON responses.
-
-Out of scope for this repository:
-
-- Production frontend applications (a lightweight validation UI is available at `/ui`)
-- Non-AI backend features outside orchestration/data access
-
----
-
-## 2) High-Level Architecture
-
-```text
-User
-  → FastAPI API Layer
-  → Request Validation + Security
-  → Orchestrator (AgentPipeline)
-  → AI Agents + Data Layer
-  → Ranking / Deals / Optimization
-  → Response Builder
-  → Structured JSON Response
-```
-
-Production-oriented flow:
-
-```text
-User → CDN → Load Balancer → FastAPI Backend → AI System → Database/Cache
-```
-
----
-
-## 3) Core Components
-
-### 3.1 API / Backend Layer
-
-- **FastAPI app**: `app/main.py`
-- **Routes**: `app/api/routes/`
-  - `search.py`
-  - `recipe.py`
-  - `cart.py`
-- **Request validation**: `app/api/request_handler.py`
-- **Response assembly**: `app/response/builder.py`
-- **Global exception handling**: `app/core/exceptions.py`
-
-### 3.2 AI Orchestration Layer
-
-- **Orchestrator**: `app/orchestrator/pipeline.py`
-  - Executes multi-agent pipeline
-  - Supports intent-based branch to recipe pipeline
-  - Handles cart optimization workflow
-
-### 3.3 AI Agent Layer
-
-- `app/agents/query_understanding.py`
-- `app/agents/product_matching.py`
-- `app/agents/ranking.py`
-- `app/agents/deal_detection.py`
-- `app/agents/recipe.py`
-
-### 3.4 LLM Layer
-
-- **LLM Manager**: `app/llm/manager.py`
-  - OpenAI + Groq support
-  - Structured JSON enforcement
-  - Provider fallback handling
-
-### 3.5 Data / Performance / Reliability
-
-- **Data models**: `app/data/models.py`
-- **Data access layer**: `app/data/layer.py` (pre-processed/mock catalog)
-- **Redis cache**: `app/cache/redis_cache.py`
-- **Queue workers**: `app/queue/worker.py`
-
-### 3.6 Security
-
-- **API key auth**
-- **Proxy-aware IP rate limiting**
-- Security module: `app/core/security.py`
-
----
-
-## 4) Multi-Agent Pipeline
-
-### Adaptive Intelligence + Execution Pipeline
-
-```text
-User Query
-  → LanguageProcessingAgent
-  → IntentDetectionAgent
-      ↳ multi-intent detection (primary + secondary intents)
-  → EntityExtractionAgent
-      ↳ candidate entities (ambiguity preserved)
-  → NormalizationAgent
-      ↳ synonym memory + alias expansion
-  → ConstraintExtractionAgent
-      ↳ budget/servings/preferences/conflict analysis
-  → DomainGuardAgent
-  → AmbiguityReasoningAgent
-  → ExecutionPlannerAgent (adaptive routing)
-  → FallbackAgent
-  → OutputFormatterAgent
-  → (FinalStructuredQuery complete)
-  → Execution Layer (structured input only)
-      ↳ ProductMatchingAgent
-      ↳ RankingAgent (constraint-weight aware)
-      ↳ DealDetectionAgent
-  → ResponseBuilder
-```
-
-Guarantees:
-- execution never starts before `FinalStructuredQuery` is finalized
-- execution never consumes raw query text
-- ambiguity can be preserved with delayed resolution strategy
-- multi-intent can produce adaptive execution plans
-
-### Recipe Pipeline
-
-```text
-User Recipe Query
-  → QueryUnderstandingAgent (intent=recipe)
-  → RecipeAgent
-  → Ingredient-product mapping
-  → Cheapest-option selection
-  → ResponseBuilder
-```
-
-### Cart Optimization Pipeline
-
-```text
-Cart Items
-  → Product lookup across platforms
-  → Cheapest item-level pick
-  → Platform grouping
-  → Savings estimation
-  → ResponseBuilder
-```
-
----
-
-## 5) Supported Platforms
-
-Current platform model supports:
-
-- Blinkit
-- Zepto
-- Instamart
-- BigBasket
-- JioMart
-- DMart
-
----
-
-## 6) API Reference
-
-### `POST /parse-query`
-Intelligence-layer endpoint. Returns machine-usable structured query contract.
-
-Request:
-
-```json
-{
-  "query": "cheap milk under 35"
-}
-```
-
-### `POST /search`
-Execution-layer endpoint. Accepts **FinalStructuredQuery only** and executes matching/ranking/deals from structured intelligence.
-
-### `POST /execute`
-Strict execution alias for `/search` with the same `FinalStructuredQuery`-only contract.
-
-Request:
-
-```json
-{
-  "clean_query": { "...": "..." },
-  "intent_result": { "...": "..." },
-  "raw_entities": { "...": "..." },
-  "normalized_entities": { "...": "..." },
-  "constraints": { "...": "..." },
-  "domain_guard": { "...": "..." },
-  "ambiguity": { "...": "..." },
-  "fallback": { "...": "..." },
-  "execution_plan": { "...": "..." },
-  "execution_graph": { "...": "..." },
-  "candidate_paths": [],
-  "user_context": { "...": "..." },
-  "learning_signals": { "...": "..." },
-  "evaluation_history": [],
-  "failure_policies": [],
-  "structured_query": { "...": "..." }
-}
-```
-
-### `POST /recipe`
-Converts recipe intent into ingredient list + mapped products.
-
-Request:
-
-```json
-{
-  "query": "tomato pasta",
-  "servings": 2
-}
-```
-
-### `POST /cart-optimization`
-Optimizes total cart cost with split-order strategy.
-
-Request:
-
-```json
-{
-  "items": [
-    { "name": "milk", "quantity": 1 },
-    { "name": "bread", "quantity": 1 }
-  ]
-}
-```
-
-### Health and metadata endpoints
-
-- `GET /` → basic service info + endpoint list
-- `GET /health` → app status and cache status
-- `GET /ui` → lightweight comparison interface for end-to-end workflow validation
-
----
-
-## 7) Strict Data Contracts
-
-All intelligence stages use explicit machine-consumable schemas from `app/data/models.py`.
-
-- `CleanQuery`: normalized text, language, and token list.
-- `IntentResult`: classified intent + confidence + notes.
-- `RawEntities`: extracted entities with ambiguity flags.
-- `NormalizedEntities`: canonical entities + unresolved entity list.
-- `Constraints`: budget/servings/preferences + ranking preference weights.
-- `DomainGuardResult`: allow/block decision with confidence and reason.
-- `AmbiguityDecision`: candidate entities + delayed-resolution strategy.
-- `FallbackDecision`: fallback mode/reason/alternatives.
-- `ExecutionPlan`: adaptive execution routing steps and reason.
-- `UserContext`: personalization context (preferences, dietary patterns, budget habits).
-- `LearningSignals`: closed-loop learning metadata (normalization reinforcement, ranking adjustments, retries, evaluation notes).
-- `FinalStructuredQuery`: all intelligence outputs + `StructuredQuery`.
-
-`/parse-query` returns `FinalStructuredQuery` directly.
-
----
-
-## 8) Agent Responsibilities
-
-- `LanguageProcessingAgent` — query cleaning/tokenization.
-- `IntentDetectionAgent` — intent classification.
-- `EntityExtractionAgent` — raw entity extraction.
-- `NormalizationAgent` — canonical item mapping + synonym learning.
-- `ConstraintExtractionAgent` — budget/servings/preferences extraction.
-- `DomainGuardAgent` — grocery-domain safety gating.
-- `FallbackAgent` — ambiguity/exploratory fallback strategy.
-- `AmbiguityReasoningAgent` — delayed-resolution decisioning for ambiguous queries.
-- `ExecutionPlannerAgent` — graph-based planning for conditional, branching execution.
-- `ConstraintOptimizerAgent` — multi-objective optimization weights and candidate scoring.
-- `UserContextAgent` — derives personalization context for planning/ranking adaptation.
-- `EvaluationAgent` — governing decision authority that scores each candidate path and drives iterative re-planning.
-- `OutputFormatterAgent` — final strict structured output assembly.
-- `SynonymMemoryAgent` — remembers raw-term → canonical mappings.
-- `QueryLoggingAgent` — stage-wise structured observability + learning/failure counters.
-
----
-
-## 9) System Guarantees
-
-- No raw entities are sent to matching/ranking.
-- No execution before structured intelligence is finalized.
-- `/search` requires `FinalStructuredQuery` (execution-only contract).
-- Unsupported domain queries are blocked by domain guard with structured metadata.
-- Exploratory/vague queries are handled via fallback mode with alternatives.
-- Multi-intent queries produce adaptive execution plans.
-- Learning loop updates synonym memory from successful parsing outcomes.
-- Evaluation loop can refine execution once when ambiguity/constraints indicate low-quality output.
-- Structured output remains deterministic JSON across all endpoints.
-
----
-
-## 10) Standard Response Contract
-
-All AI endpoints return structured JSON based on:
-
-```json
-{
-  "query": "",
-  "results": [],
-  "best_option": {},
-  "deals": [],
-  "total_price": 0
-}
-```
-
-Current implementation also includes `metadata` for debugging/observability.
-
----
-
-## 11) Configuration
-
-Environment configuration lives in `.env` (see `.env.example`):
-
-- App: `DEBUG`
-- Security: `API_KEYS`, rate limit settings
-- LLM: provider and model keys/settings
-- Redis: URL + TTL
-- Data mode: mock/preprocessed switch
-
-Core settings class: `app/core/config.py`.
-
----
-
-## 12) Caching & Queue Design
-
-### Redis Cache
-
-- Cache keys are deterministic and hashed
-- Read-through pattern used in search and recipe flows
-- Graceful degradation when Redis is unavailable
-
-### Queue Workers
-
-Background job framework (asyncio-based) supports:
-
-- scraping jobs
-- price history refresh
-- price alerts
-- cache warm-up
-
----
-
-## 13) Error Handling Strategy
-
-- Centralized exception handlers ensure JSON-safe errors
-- LLM failures degrade gracefully via fallbacks
-- Data/cache failures do not crash core API flow when recoverable
-
----
-
-## 14) Local Development
-
-### Requirements
-
-- Python 3.11+ recommended
-- pip
-
-### Setup
+# smartcart ai backend technical documentation
+
+## system overview
+
+smartcart ai backend is a fastapi service that converts grocery-language requests into structured execution, runs cross-platform matching and ranking, and returns a normalized response contract (`FinalResponse`).
+
+implementation in code uses:
+- api routes in `app/api/routes/*`
+- orchestration in `app/orchestrator/pipeline.py`
+- matching data layer in `app/data/layer.py`
+- response assembly in `app/response/builder.py`
+- background ingestion components in `app/jobs/scheduler.py`, `app/queue/worker.py`, `app/scrapers/blinkit_scraper.py`, `app/data/database.py`
+
+ai responsibilities are query interpretation, normalization, planning, and scoring. data-layer responsibilities are product retrieval (database-first), fallback retrieval, and persistence.
+
+## end to end request lifecycle
+
+for a standard search flow used by clients, code path is:
+
+1. client sends raw text to `POST /parse-query` (`app/api/routes/search.py`).
+2. route validates `SearchRequest.query`, checks api key and rate limit, then calls `AgentPipeline.parse_query`.
+3. `parse_query` runs this ordered pipeline (`app/orchestrator/pipeline.py`):
+   - language processing
+   - intent detection
+   - entity extraction
+   - normalization for entities
+   - constraint extraction
+   - domain guard
+   - ambiguity reasoning
+   - fallback decision
+   - user context generation
+   - execution planning (plan + graph + candidate paths)
+   - output formatter to `FinalStructuredQuery`
+4. client sends returned `FinalStructuredQuery` to `POST /search` (or `POST /execute`, alias).
+5. route checks cache with key from `structured_query.normalized_query` (fallback to `clean_query.normalized_text`).
+6. on cache miss, route calls `AgentPipeline.run_search`.
+7. `run_search` validates domain guard and unsupported intent conditions.
+8. if execution graph contains `recipe_generation`, pipeline delegates to recipe flow.
+9. otherwise pipeline builds candidate entity paths, normalizes each candidate, and calls product matching.
+10. product matching (`ProductMatchingAgent`) calls `match_products_for_entity` in data layer.
+11. data layer tries database lookup first, then optional api fallback, then mock fallback only when enabled.
+12. ranked results are generated by `RankingAgent`; deals by `DealDetectionAgent`; response by `ResponseBuilder.build_search_response`.
+13. `EvaluationAgent` scores quality and can trigger bounded retry up to three attempts.
+14. selected path metadata, platform signals, and coordination trace are attached.
+15. final `FinalResponse` is cached and returned.
+
+## architecture
+
+startup/shutdown wiring is in `app/main.py` lifespan:
+- initialize database schema (`init_database`)
+- connect optional redis cache (`get_cache().connect()`)
+- start in-memory job queue with two workers (`get_job_queue().start(num_workers=2)`)
+- start scraper scheduler (`get_scraper_scheduler().start()`)
+- on shutdown: stop scheduler, stop queue, disconnect cache, close database
+
+component linkage from imports/calls:
+- api routes call pipeline singleton (`get_pipeline`)
+- pipeline uses agents, data layer, shared memory, coordination network, response builder
+- scheduler enqueues `JobType.scrape_prices`
+- queue worker dispatches blinkit scrape handler
+- scraper extracts rows and calls `save_products_to_db`
+- data layer and runtime matching use `ProductRecord` via sqlalchemy sessions
+
+## data pipeline
+
+implemented ingestion path:
+
+1. `ScraperScheduler._run` enqueues scrape job periodically (`scraper_interval_minutes`, min 5).
+2. queue worker executes `handle_scrape_prices`.
+3. for `platform == "blinkit"`, worker calls `run_blinkit_scrape(category)`.
+4. scraper fetches `SCRAPER_BLINKIT_URL` with `httpx.get(..., params={"category": category})`.
+5. html is parsed with beautifulsoup selectors:
+   - card selectors: `[data-product-id], .product-card, .ProductCard`
+   - name: `[data-name], .name, .product-name`
+   - price: `[data-price], .price, .product-price`
+   - url: first anchor `a[href]`
+6. cleaner stage constructs normalized row dicts (`platform`, `product_id`, `name`, `normalized_name`, `price`, `product_url`, etc.).
+7. `save_products_to_db` upserts by `(platform, product_id)` and commits.
+
+request-path query pipeline:
+- `match_products_for_entity` calls `_search_db_products` first
+- query is `like` over `normalized_name` and `product_name` (lowercased)
+- results map from `ProductRecord` to `PlatformProduct`
+
+## database schema
+
+`app/data/database.py` defines `products` with unique constraint `(platform, product_id)`.
+
+fields and runtime usage:
+- `id`: internal primary key
+- `product_id`: platform-native id used for dedupe and join identity in ranking output
+- `product_name`: display title returned in responses (`name`)
+- `normalized_name`: lookup/search key for entity matching
+- `brand`: response display and optional brand filter matching
+- `category`: optional category filter path in db query
+- `price`: ranking and cart optimization objective
+- `platform`: source marketplace identifier used in grouping/comparison
+- `product_url`: mapped to response `url`; may be null
+- `delivery_time`: mapped to `delivery_time_minutes` for ranking and objective scoring
+- `rating`: used in ranking score
+- `original_price`: used in deal calculation/response
+- `discount_percent`: used in ranking and deal detection
+- `unit`: response display
+- `in_stock`: filters candidate lists before ranking
+- `source`: provenance marker (`db` or `api` typically)
+- `last_updated`: freshness timestamp written on upsert
+
+## search execution logic
+
+`match_products_for_entity` behavior in order:
+
+1. expand normalized query terms and variants.
+2. run `_search_db_products(expanded_terms, category)`.
+3. if db results exist, return immediately with metadata `source: "db"`.
+4. if db miss, attempt `_fetch_api_fallback(entity)` when enabled and api url configured.
+5. api fallback uses retry/backoff and normalizes rows.
+6. fallback rows are persisted via `save_products_to_db` and returned as `PlatformProduct(source="api")`.
+7. if still no result and `mock_data_enabled` is false, return empty set.
+8. if `mock_data_enabled` is true, fallback to `_MOCK_PRODUCTS` matching path.
+
+`ProductMatchingAgent` then applies query filters (`max_price`, `min_price`, optional brand contains check) and top-k relax fallback when filters remove everything.
+
+## ranking system
+
+`app/agents/ranking.py` computes composite score per in-stock product:
+- price weight: `0.40`
+- delivery weight: `0.30`
+- rating weight: `0.20`
+- discount weight: `0.10`
+
+scoring is min-max normalized by current candidate set. if caller preference sets `price >= 0.60`, ranking switches to deterministic price-first sort:
+- price asc
+- delivery asc
+- rating desc
+- discount desc
+
+pipeline can override weights via constraint optimizer from explicit preferences and user context.
+
+## cart optimization logic
+
+`AgentPipeline.run_cart_optimize` does:
+
+1. normalize each cart item name.
+2. retrieve products for canonical name via data layer.
+3. select per-item global best by objective:
+   - `price + (delivery_weight * normalized_delivery * price)`
+   - delivery weight constant is `0.2`
+4. group selected products by platform and compute group subtotals.
+5. compute split-cart total.
+6. compute single-platform aggregate costs and savings versus max single-platform total.
+7. return grouped result + metadata with optimization objective and stores considered.
+
+## recipe pipeline
+
+`AgentPipeline.run_recipe` delegates to `RecipeAgent.run`.
+
+`RecipeAgent` steps:
+1. validate non-empty query.
+2. request ingredient json from llm manager.
+3. on llm failure or empty ingredients, use static recipe fallback map.
+4. normalize each ingredient term with `NormalizationAgent`.
+5. call `get_products_for_entity` per ingredient.
+6. choose cheapest in-stock product per ingredient.
+7. build `RecipeResult` with total estimated cost and missing items.
+8. `ResponseBuilder.build_recipe_response` formats ingredient availability summary.
+
+## data integrity guarantees
+
+implemented response-level and storage-level guarantees:
+- response builder sets `link_status = "available"` only when `url` exists, otherwise `"link unavailable"`.
+- scraper stores extracted `product_url` as-is, or null when unavailable.
+- data layer maps db `product_url` directly into `PlatformProduct.url`.
+- source provenance is explicit: db results use `source="db"`; api fallback returns `source="api"`.
+
+## fallback behavior
+
+api fallback is optional and gated by config:
+- enabled by `API_FALLBACK_ENABLED=true`
+- target endpoint from `EXTERNAL_PRODUCT_API_URL`
+
+retry logic in `_fetch_api_fallback`:
+- max attempts: `api_fallback_max_retries`
+- base backoff: `api_fallback_backoff_seconds`
+- on http 429, sleep `backoff * 2^attempt` and retry
+- on transport/other exceptions, retry similarly
+- after final failure, logs warning and returns empty
+
+## reliability behavior
+
+redis behavior:
+- cache layer attempts redis connection on startup
+- if unavailable, logs warning and all cache operations become no-ops
+- health endpoint reports cache availability state
+
+rate limit behavior:
+- in-memory sliding window keyed by client ip (`X-Forwarded-For` aware)
+- exceeded limit returns `429` with limit/window detail
+
+failure handling:
+- custom exception handlers return structured error json
+- generic unhandled exceptions return 500 structured error payload
+- db init failure at startup is tolerated with degraded mode warning
+
+## limitations
+
+code-visible limitations:
+- db layer still contains optional mock fallback path controlled by `mock_data_enabled`.
+- scheduler currently enqueues only blinkit scrape jobs.
+- scraper extraction is selector-dependent and best-effort; html structure changes can reduce extraction.
+- scraper accepts only absolute `http://`/`https://` links; other href forms are stored as null.
+- api fallback requires `EXTERNAL_PRODUCT_API_URL`; otherwise fallback is skipped.
+- queue is in-memory and process-local (no distributed broker).
+
+## deployment and running
+
+required environment variables (see `app/core/config.py` and `.env.example`):
+- app/security: `DEBUG`, `API_KEYS`, `API_KEY_HEADER`, `RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW_SECONDS`
+- llm: `LLM_PROVIDER`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `OPENAI_MODEL`, `GROQ_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`
+- cache: `REDIS_URL`, `CACHE_TTL_SECONDS`
+- data/scraper: `DATABASE_URL`, `DB_SCHEMA_AUTO_CREATE`, `DB_ECHO`, `MOCK_DATA_ENABLED`, `SCRAPER_ENABLED`, `SCRAPER_INTERVAL_MINUTES`, `SCRAPER_BLINKIT_URL`
+- api fallback: `API_FALLBACK_ENABLED`, `API_FALLBACK_MAX_RETRIES`, `API_FALLBACK_BACKOFF_SECONDS`, `EXTERNAL_PRODUCT_API_URL`
+
+run locally:
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Run server
+operational notes:
+- disable mock runtime behavior in production by setting `MOCK_DATA_ENABLED=false`
+- enable scraper by setting `SCRAPER_ENABLED=true` and providing `SCRAPER_BLINKIT_URL`
+- provide reachable postgresql `DATABASE_URL`
 
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### Run tests
+## testing
 
 ```bash
 python -m pytest -q
 ```
-
----
-
-## 15) Docker
-
-Build:
-
-```bash
-docker build -t smartcart-ai-backend .
-```
-
-Run:
-
-```bash
-docker run --rm -p 8000:8000 smartcart-ai-backend
-```
-
----
-
-## 16) Repository Structure
-
-```text
-app/
-  agents/         # AI multi-agent logic
-  api/            # FastAPI request/route layer
-  orchestrator/   # Pipeline execution engine
-  llm/            # LLM provider abstraction
-  data/           # Product models and data access
-  cache/          # Redis cache integration
-  queue/          # Background worker system
-  core/           # Config, security, exception handling
-  response/       # Unified response builder
-tests/            # Unit + integration + API tests
-```
-
----
-
-## 17) Additional Technical Docs
-
-- **AI Logic documentation**: `app/agents/README.md`
-- **FastAPI Backend documentation**: `app/api/README.md`
-
-
-## Platform-level intelligence integration
-
-The AI layer now consumes platform events through `/platform-events` and continuously updates shared memory used by planning, ranking, and optimization.
-
-### Continuous intelligence loop
-- Event ingestion: user behavior, order creation, inventory and price changes
-- Shared memory: persistent user models, strategy memories, product/market state
-- Distributed coordination: agent signal exchange (`coordination_trace`) for decision influence
-- Real-time adaptation: live inventory/price signals can re-route candidate execution paths during search
-- Predictive behavior: user context includes `predicted_needs` from long-term consumption patterns
-- Cross-service intelligence: recommendation, analytics, and forecast signals influence planning and ranking
-- Global optimization: cart optimization objective now combines cost, delivery, and availability at platform level

@@ -6,18 +6,41 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.agents.deal_detection import DealDetectionAgent
+from app.agents.ambiguity_reasoning import AmbiguityReasoningAgent
+from app.agents.evaluation import EvaluationAgent
 from app.agents.normalization import NormalizationAgent
 from app.agents.product_matching import ProductMatchingAgent
 from app.agents.query_understanding import QueryUnderstandingAgent, _rule_based_parse
 from app.agents.ranking import RankingAgent
 from app.agents.recipe import RecipeAgent
+from app.data import layer as data_layer
 from app.data.models import (
+    AmbiguityDecision,
+    CleanQuery,
+    Constraints,
+    DomainGuardResult,
+    EvaluationResult,
+    LearningSignals,
+    FallbackDecision,
+    FinalResponse,
+    FinalStructuredQuery,
+    IntentResult,
+    NormalizedEntities,
+    NormalizedEntity,
+    RawEntities,
+    RawEntity,
+    QueryMetadata,
+    QueryConstraints,
     Platform,
     PlatformProduct,
     QueryFilters,
     QueryIntent,
     StructuredQuery,
     UnifiedProduct,
+    UserContext,
+    ExecutionPlan,
+    ExecutionGraph,
+    StructuredItem,
 )
 
 
@@ -139,6 +162,43 @@ class TestNormalizationAgent:
         result = await agent.run("jeera")
         assert result.canonical_name == "cumin seeds"
 
+    @pytest.mark.asyncio
+    async def test_normalization_mayo_maps_to_mayonnaise(self):
+        mock_llm = AsyncMock()
+        mock_llm.call.side_effect = Exception("LLM unavailable")
+        agent = NormalizationAgent(mock_llm)
+        result = await agent.run("mayo")
+        assert result.canonical_name == "mayonnaise"
+
+
+class TestAmbiguityReasoningAgent:
+    @pytest.mark.asyncio
+    async def test_single_high_confidence_entity_skips_ambiguity(self):
+        agent = AmbiguityReasoningAgent()
+        decision = await agent.run(
+            IntentResult(intent=QueryIntent.product_search, confidence=0.9, notes=""),
+            RawEntities(
+                entities=[RawEntity(text="garlic", confidence=0.8)],
+                primary_entity="garlic",
+                ambiguity_flags=[],
+                candidate_entities=["garlic"],
+            ),
+            NormalizedEntities(
+                entities=[
+                    NormalizedEntity(
+                        raw_text="garlic",
+                        canonical_name="garlic",
+                        category="vegetable",
+                        possible_variants=["garlic"],
+                        confidence=0.9,
+                    )
+                ],
+                unresolved_entities=[],
+            ),
+        )
+        assert decision.needs_resolution is False
+        assert decision.resolution_strategy == "none"
+
 
 # ---------------------------------------------------------------------------
 # Product Matching Agent
@@ -200,6 +260,25 @@ class TestProductMatchingAgent:
         )
         result = await agent.run(sq)
         assert len(result.platforms) == 3
+
+    @pytest.mark.asyncio
+    async def test_match_uses_db_source_when_db_returns_rows(self):
+        agent = ProductMatchingAgent()
+        sq = StructuredQuery(product="milk", filters=QueryFilters(), intent=QueryIntent.product_search, raw_query="milk")
+        sample = PlatformProduct(
+            platform=Platform.blinkit,
+            product_id="db-1",
+            name="DB Milk",
+            normalized_name="milk",
+            price=30.0,
+            source="db",
+        )
+        with patch.object(data_layer, "_search_db_products", return_value=[sample]), patch.object(
+            data_layer, "_fetch_api_fallback", return_value=[]
+        ):
+            result = await agent.run(sq)
+        assert len(result.platforms) == 1
+        assert result.platforms[0].source == "db"
 
 
 # ---------------------------------------------------------------------------
@@ -372,3 +451,56 @@ class TestRecipeAgent:
         agent = RecipeAgent(mock_llm)
         result = await agent.run("rice bowl")
         assert result.total_estimated_cost > 0
+
+
+class TestEvaluationAgent:
+    @pytest.mark.asyncio
+    async def test_single_entity_no_results_does_not_retry(self):
+        agent = EvaluationAgent()
+        parsed = FinalStructuredQuery(
+            clean_query=CleanQuery(text="unknown garlic", normalized_text="unknown garlic"),
+            intent_result=IntentResult(intent=QueryIntent.product_search, confidence=0.9, notes=""),
+            raw_entities=RawEntities(
+                entities=[RawEntity(text="garlic", confidence=0.8)],
+                primary_entity="garlic",
+                ambiguity_flags=[],
+                candidate_entities=["garlic"],
+            ),
+            normalized_entities=NormalizedEntities(
+                entities=[
+                    NormalizedEntity(
+                        raw_text="garlic",
+                        canonical_name="garlic",
+                        category="vegetable",
+                        possible_variants=["garlic"],
+                        confidence=0.9,
+                    )
+                ],
+                unresolved_entities=[],
+            ),
+            constraints=Constraints(),
+            domain_guard=DomainGuardResult(allowed=True),
+            ambiguity=AmbiguityDecision(needs_resolution=False, candidate_entities=["garlic"], confidence=0.9),
+            fallback=FallbackDecision(),
+            execution_plan=ExecutionPlan(),
+            execution_graph=ExecutionGraph(graph_id="g"),
+            candidate_paths=[],
+            user_context=UserContext(),
+            learning_signals=LearningSignals(),
+            evaluation_history=[],
+            failure_policies=[],
+            structured_query=StructuredQuery(
+                product="garlic",
+                filters=QueryFilters(),
+                intent=QueryIntent.product_search,
+                normalized_query="garlic",
+                items=[StructuredItem(name="garlic", category="vegetable")],
+                constraints=QueryConstraints(),
+                metadata=QueryMetadata(confidence=0.9, notes=""),
+                raw_query="garlic",
+            ),
+        )
+        response = FinalResponse(query="garlic", results=[], best_option={}, deals=[], total_price=0.0, metadata={})
+        result = await agent.run(parsed, response)
+        assert result.should_retry is False
+        assert result.success is True

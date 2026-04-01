@@ -6,9 +6,18 @@ request path (see architecture principles).
 """
 
 import random
+import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import httpx
+from sqlalchemy import func, or_
+
+from app.core.config import get_settings
+from app.data.database import ProductRecord, get_db_session
 from app.data.models import Platform, PlatformProduct, PriceHistory, PricePoint
+
+import logging
 
 # ---------------------------------------------------------------------------
 # Mock product catalogue — simulates the structured database output
@@ -116,6 +125,11 @@ _MOCK_PRODUCTS: Dict[str, List[dict]] = {
         {"platform": Platform.zepto, "product_id": "zp-salad-001", "name": "Fresh Salad Leaves 200g", "normalized_name": "salad", "price": 65.0, "original_price": 70.0, "unit": "200g", "rating": 4.1, "delivery_time_minutes": 10, "discount_percent": 7.1},
         {"platform": Platform.blinkit, "product_id": "bl-salad-001", "name": "Lettuce Iceberg 1pc", "normalized_name": "salad", "price": 58.0, "original_price": 65.0, "unit": "1 pc", "rating": 4.0, "delivery_time_minutes": 12, "discount_percent": 10.8},
     ],
+    "mayonnaise": [
+        {"platform": Platform.blinkit, "product_id": "bl-mayo-001", "name": "Veeba Eggless Mayonnaise 250g", "normalized_name": "mayonnaise", "price": 109.0, "original_price": 119.0, "unit": "250g", "rating": 4.5, "delivery_time_minutes": 12, "discount_percent": 8.4},
+        {"platform": Platform.zepto, "product_id": "zp-mayo-001", "name": "Del Monte Veg Mayonnaise 250g", "normalized_name": "mayonnaise", "price": 104.0, "original_price": 115.0, "unit": "250g", "rating": 4.4, "delivery_time_minutes": 10, "discount_percent": 9.6},
+        {"platform": Platform.bigbasket, "product_id": "bb-mayo-001", "name": "Dr. Oetker FunFoods Mayonnaise 250g", "normalized_name": "mayonnaise", "price": 112.0, "original_price": 122.0, "unit": "250g", "rating": 4.6, "delivery_time_minutes": 30, "discount_percent": 8.2},
+    ],
 }
 
 # Aliases: maps query terms to catalogue keys
@@ -154,6 +168,10 @@ _PRODUCT_ALIASES: Dict[str, str] = {
     "snack": "snacks",
     "salad leaves": "salad",
     "green leaves": "salad",
+    "mayo": "mayonnaise",
+    "mayonnaise": "mayonnaise",
+    "veg mayo": "mayonnaise",
+    "eggless mayo": "mayonnaise",
 }
 
 _QUERY_EXPANSIONS: Dict[str, List[str]] = {
@@ -165,7 +183,10 @@ _QUERY_EXPANSIONS: Dict[str, List[str]] = {
     "snacks": ["chips", "biscuits", "namkeen"],
     "salad": ["salad leaves", "lettuce", "green leaves"],
     "wheat flour": ["atta", "whole wheat atta"],
+    "mayonnaise": ["mayo", "veg mayo", "eggless mayo"],
 }
+
+_BRAND_TOKEN_BLACKLIST = {"fresh", "organic", "premium", "classic", "farm", "red", "green"}
 
 _CATEGORY_TO_ENTITIES: Dict[str, List[str]] = {
     "dairy": ["milk", "curd", "butter", "ghee"],
@@ -190,6 +211,8 @@ _TERM_TO_CATEGORY: Dict[str, str] = {
     "snacks": "snacks",
     "salad": "vegetable",
 }
+_settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 def _normalize(term: str) -> str:
@@ -211,6 +234,223 @@ def _expand_query_terms(entity: str) -> List[str]:
 
 def _tokenize(text: str) -> List[str]:
     return [t for t in text.lower().replace("-", " ").split() if t]
+
+
+def _extract_brand(name: str) -> Optional[str]:
+    tokens = [t for t in name.replace("-", " ").split() if t]
+    if not tokens:
+        return None
+    for token in tokens[:3]:
+        lower = token.lower()
+        if lower in _BRAND_TOKEN_BLACKLIST:
+            continue
+        return token
+    return None
+
+
+def _ensure_product_fields(item: dict) -> dict:
+    enriched = dict(item)
+    name = str(enriched.get("name") or "")
+    enriched["brand"] = enriched.get("brand") or _extract_brand(name)
+    enriched["source"] = str(enriched.get("source") or "db")
+    return enriched
+
+
+def _platform_value(raw_platform: str) -> Optional[Platform]:
+    try:
+        return Platform(str(raw_platform).lower().strip())
+    except Exception:
+        return None
+
+
+def _record_to_platform_product(record: ProductRecord) -> Optional[PlatformProduct]:
+    platform = _platform_value(record.platform)
+    if not platform:
+        return None
+    return PlatformProduct(
+        platform=platform,
+        product_id=record.product_id,
+        name=record.product_name,
+        normalized_name=record.normalized_name,
+        price=record.price,
+        original_price=record.original_price,
+        discount_percent=record.discount_percent,
+        unit=record.unit or "",
+        rating=record.rating,
+        delivery_time_minutes=record.delivery_time,
+        in_stock=record.in_stock,
+        url=record.product_url,
+        brand=record.brand,
+        source=record.source or "db",
+    )
+
+
+def _api_fallback_item_to_product(item: Dict[str, Any]) -> Optional[PlatformProduct]:
+    platform = _platform_value(str(item.get("platform", "")))
+    if not platform:
+        return None
+    return PlatformProduct(
+        platform=platform,
+        product_id=str(item.get("product_id") or "").strip(),
+        name=str(item.get("name") or "").strip(),
+        normalized_name=str(item.get("normalized_name") or "").strip().lower(),
+        price=float(item.get("price") or 0.0),
+        original_price=item.get("original_price"),
+        discount_percent=item.get("discount_percent"),
+        unit=item.get("unit") or "",
+        rating=item.get("rating"),
+        delivery_time_minutes=item.get("delivery_time"),
+        in_stock=bool(item.get("in_stock", True)),
+        url=item.get("product_url"),
+        brand=item.get("brand"),
+        source="api",
+    )
+
+
+def save_products_to_db(products: List[Dict[str, Any]]) -> int:
+    """Upsert products into DB preserving scraped URLs exactly as provided."""
+    if not products:
+        return 0
+    session = None
+    upserted = 0
+    try:
+        session = get_db_session()
+        for item in products:
+            platform = str(item.get("platform") or "").lower().strip()
+            product_id = str(item.get("product_id") or "").strip()
+            if not platform or not product_id:
+                continue
+            existing = (
+                session.query(ProductRecord)
+                .filter(ProductRecord.platform == platform, ProductRecord.product_id == product_id)
+                .first()
+            )
+            payload = {
+                "product_name": str(item.get("name") or item.get("product_name") or "").strip(),
+                "normalized_name": str(item.get("normalized_name") or "").strip(),
+                "brand": item.get("brand"),
+                "category": item.get("category"),
+                "price": float(item.get("price") or 0.0),
+                "product_url": item.get("product_url") if "product_url" in item else item.get("url"),
+                "delivery_time": item.get("delivery_time") if "delivery_time" in item else item.get("delivery_time_minutes"),
+                "rating": item.get("rating"),
+                "original_price": item.get("original_price"),
+                "discount_percent": item.get("discount_percent"),
+                "unit": item.get("unit"),
+                "in_stock": bool(item.get("in_stock", True)),
+                "source": str(item.get("source") or "db"),
+                "last_updated": datetime.utcnow(),
+            }
+            if existing:
+                for k, v in payload.items():
+                    setattr(existing, k, v)
+            else:
+                existing = ProductRecord(
+                    platform=platform,
+                    product_id=product_id,
+                    **payload,
+                )
+                session.add(existing)
+            upserted += 1
+        session.commit()
+        return upserted
+    except Exception:
+        session.rollback()
+        logger.exception("Failed to save products to DB")
+        return 0
+    finally:
+        if session is not None:
+            session.close()
+
+
+def _search_db_products(expanded_terms: List[str], category: Optional[str]) -> List[PlatformProduct]:
+    session = None
+    try:
+        session = get_db_session()
+        query = session.query(ProductRecord)
+        if category:
+            query = query.filter(func.lower(ProductRecord.category) == category.lower().strip())
+        clauses = []
+        for term in expanded_terms:
+            pattern = f"%{term.lower()}%"
+            clauses.extend(
+                [
+                    func.lower(ProductRecord.normalized_name).like(pattern),
+                    func.lower(ProductRecord.product_name).like(pattern),
+                ]
+            )
+        if clauses:
+            query = query.filter(or_(*clauses))
+        records = query.order_by(ProductRecord.price.asc()).limit(250).all()
+        products: List[PlatformProduct] = []
+        for record in records:
+            mapped = _record_to_platform_product(record)
+            if mapped:
+                products.append(mapped)
+        return products
+    except Exception:
+        logger.exception("DB product search failed")
+        return []
+    finally:
+        if session is not None:
+            session.close()
+
+
+def _fetch_api_fallback(entity: str) -> List[Dict[str, Any]]:
+    if not _settings.api_fallback_enabled:
+        return []
+    api_url = getattr(_settings, "external_product_api_url", "")
+    if not api_url:
+        return []
+    retries = max(1, int(_settings.api_fallback_max_retries))
+    backoff = max(0.1, float(_settings.api_fallback_backoff_seconds))
+    for attempt in range(retries):
+        try:
+            response = httpx.get(api_url, params={"q": entity}, timeout=8.0)
+            if response.status_code == 429:
+                time.sleep(backoff * (2 ** attempt))
+                continue
+            response.raise_for_status()
+            payload = response.json()
+            rows = payload.get("items", payload if isinstance(payload, list) else [])
+            normalized: List[Dict[str, Any]] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                platform = _platform_value(str(row.get("platform", "")))
+                if not platform:
+                    continue
+                product_id = str(row.get("product_id") or "").strip()
+                name = str(row.get("product_name") or row.get("name") or "").strip()
+                if not product_id or not name:
+                    continue
+                normalized_name = str(row.get("normalized_name") or entity).strip().lower()
+                normalized.append(
+                    {
+                        "platform": platform.value,
+                        "product_id": product_id,
+                        "name": name,
+                        "normalized_name": normalized_name,
+                        "brand": row.get("brand"),
+                        "category": row.get("category"),
+                        "price": float(row.get("price") or 0.0),
+                        "product_url": row.get("product_url"),
+                        "delivery_time": row.get("delivery_time") or row.get("delivery_time_minutes"),
+                        "rating": row.get("rating"),
+                        "original_price": row.get("original_price"),
+                        "discount_percent": row.get("discount_percent"),
+                        "unit": row.get("unit"),
+                        "in_stock": bool(row.get("in_stock", True)),
+                        "source": "api",
+                    }
+                )
+            return normalized
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(backoff * (2 ** attempt))
+            continue
+    logger.warning("API fallback failed after %s retries for entity=%s", retries, entity)
+    return []
 
 
 def _fallback_from_category(
@@ -251,6 +491,54 @@ def match_products_for_entity(
         for variant in possible_variants:
             expanded_terms.extend(_expand_query_terms(variant))
     expanded_terms = _unique(expanded_terms)
+
+    db_products = _search_db_products(expanded_terms, category)
+    if db_products:
+        return (
+            db_products,
+            {
+                "input_term": entity,
+                "expanded_terms": expanded_terms,
+                "matched_keys": [p.normalized_name for p in db_products],
+                "fallback_triggered": False,
+                "fallback_reason": "",
+                "source": "db",
+            },
+        )
+
+    fallback_rows = _fetch_api_fallback(entity)
+    if fallback_rows:
+        save_products_to_db(fallback_rows)
+        api_products = []
+        for item in fallback_rows:
+            mapped = _api_fallback_item_to_product(item)
+            if mapped:
+                api_products.append(mapped)
+        if api_products:
+            return (
+                api_products,
+                {
+                    "input_term": entity,
+                    "expanded_terms": expanded_terms,
+                    "matched_keys": [p.normalized_name for p in api_products],
+                    "fallback_triggered": True,
+                    "fallback_reason": "api_fallback",
+                    "source": "api",
+                },
+            )
+
+    if not _settings.mock_data_enabled:
+        return (
+            [],
+            {
+                "input_term": entity,
+                "expanded_terms": expanded_terms,
+                "matched_keys": [],
+                "fallback_triggered": False,
+                "fallback_reason": "db_no_results",
+                "source": "db",
+            },
+        )
 
     matched_keys: List[str] = []
     for key in _MOCK_PRODUCTS:
@@ -296,13 +584,14 @@ def match_products_for_entity(
             raw.append(item)
 
     return (
-        [PlatformProduct(**item) for item in raw],
+        [PlatformProduct(**_ensure_product_fields(item)) for item in raw],
         {
             "input_term": entity,
             "expanded_terms": expanded_terms,
             "matched_keys": matched_keys,
             "fallback_triggered": fallback_triggered,
             "fallback_reason": fallback_reason,
+            "source": "mock",
         },
     )
 

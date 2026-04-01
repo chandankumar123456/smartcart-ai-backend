@@ -43,8 +43,14 @@ class TestSearchPipeline:
         assert "constraints" in result.metadata
         if result.results:
             assert "url" in result.results[0]
+            assert "brand" in result.results[0]
+            assert "source" in result.results[0]
+            assert "link_status" in result.results[0]
         if result.best_option:
             assert "url" in result.best_option
+            assert "brand" in result.best_option
+            assert "source" in result.best_option
+            assert "link_status" in result.best_option
 
     @pytest.mark.asyncio
     async def test_search_with_price_filter(self, pipeline):
@@ -91,6 +97,17 @@ class TestSearchPipeline:
     async def test_search_generic_curd_alias_returns_results(self, pipeline):
         result = await self._run_from_query(pipeline, "dahi")
         assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_mayo_synonym_returns_results(self, pipeline):
+        result = await self._run_from_query(pipeline, "mayo")
+        assert len(result.results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_result_has_link_status_when_url_missing(self, pipeline):
+        result = await self._run_from_query(pipeline, "milk")
+        if result.results:
+            assert result.results[0].get("link_status") in {"available", "link unavailable"}
 
     @pytest.mark.asyncio
     async def test_search_capsicum_returns_results(self, pipeline):

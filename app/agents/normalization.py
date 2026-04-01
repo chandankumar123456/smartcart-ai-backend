@@ -37,6 +37,8 @@ Rules:
 - Keep canonical_name concise and searchable.
 """
 
+_MAYONNAISE_VARIANTS = ["mayo", "mayonnaise", "veg mayo", "eggless mayo"]
+
 _SAFE_FALLBACKS: Dict[str, Dict[str, Any]] = {
     "milk": {
         "canonical_name": "packaged milk",
@@ -98,6 +100,18 @@ _SAFE_FALLBACKS: Dict[str, Dict[str, Any]] = {
         "category": "snacks",
         "attributes": [],
     },
+    "mayo": {
+        "canonical_name": "mayonnaise",
+        "possible_variants": _MAYONNAISE_VARIANTS,
+        "category": "condiments",
+        "attributes": [],
+    },
+    "mayonnaise": {
+        "canonical_name": "mayonnaise",
+        "possible_variants": _MAYONNAISE_VARIANTS,
+        "category": "condiments",
+        "attributes": [],
+    },
 }
 
 _KEYWORD_FALLBACKS: Dict[str, Dict[str, Any]] = {
@@ -111,6 +125,10 @@ _KEYWORD_FALLBACKS: Dict[str, Dict[str, Any]] = {
     "capsicum": {"canonical_name": "capsicum", "possible_variants": ["capsicum", "shimla mirch"], "category": "vegetable", "attributes": ["fresh"]},
     "snack": {"canonical_name": "snacks", "possible_variants": ["chips", "biscuits", "namkeen"], "category": "snacks", "attributes": []},
     "salad": {"canonical_name": "salad", "possible_variants": ["salad leaves", "lettuce"], "category": "vegetable", "attributes": ["fresh"]},
+    "cucumber": {"canonical_name": "cucumber", "possible_variants": ["cucumber", "kheera"], "category": "vegetable", "attributes": ["fresh"]},
+    "garlic": {"canonical_name": "garlic", "possible_variants": ["garlic", "lahsun"], "category": "vegetable", "attributes": ["fresh"]},
+    "mayo": {"canonical_name": "mayonnaise", "possible_variants": _MAYONNAISE_VARIANTS, "category": "condiments", "attributes": []},
+    "mayonnaise": {"canonical_name": "mayonnaise", "possible_variants": _MAYONNAISE_VARIANTS, "category": "condiments", "attributes": []},
 }
 _HIGH_NORMALIZATION_CONFIDENCE = 0.9
 _LOW_NORMALIZATION_CONFIDENCE = 0.65

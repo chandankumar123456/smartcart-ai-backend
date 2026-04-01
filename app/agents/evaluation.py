@@ -24,9 +24,17 @@ class EvaluationAgent:
         if parsed.ambiguity.needs_resolution and not parsed.ambiguity.candidate_entities:
             add_signal("ambiguity_failure", "collect_candidate_entities")
 
+        has_single_clear_entity = (
+            len(parsed.normalized_entities.entities) == 1
+            and parsed.normalized_entities.entities[0].confidence >= 0.85
+            and not parsed.ambiguity.needs_resolution
+        )
         if not response.results:
-            add_signal("ambiguity_failure", "branch_with_candidate_entities")
-            add_signal("poor_match_quality", "expand_entity_variants")
+            if has_single_clear_entity:
+                corrections.append("mark_entity_unavailable_without_retry")
+            else:
+                add_signal("ambiguity_failure", "branch_with_candidate_entities")
+                add_signal("poor_match_quality", "expand_entity_variants")
 
         if parsed.constraints.budget and response.best_option:
             amount_raw = parsed.constraints.budget.get("amount")
