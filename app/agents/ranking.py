@@ -10,7 +10,7 @@ Input: UnifiedProduct
 Output: RankingResult
 """
 
-from typing import List
+from typing import Dict, List, Optional
 
 from app.data.models import Platform, PlatformProduct, RankedProduct, RankingResult, UnifiedProduct
 
@@ -21,7 +21,11 @@ _WEIGHT_RATING = 0.20
 _WEIGHT_DISCOUNT = 0.10
 
 
-def _score_product(product: PlatformProduct, all_products: List[PlatformProduct]) -> float:
+def _score_product(
+    product: PlatformProduct,
+    all_products: List[PlatformProduct],
+    ranking_preferences: Optional[Dict[str, float]] = None,
+) -> float:
     """Compute a composite score in [0, 1] (higher = better)."""
     prices = [p.price for p in all_products if p.price > 0]
     delivery_times = [p.delivery_time_minutes for p in all_products if p.delivery_time_minutes is not None]
@@ -63,11 +67,22 @@ def _score_product(product: PlatformProduct, all_products: List[PlatformProduct]
     d = product.discount_percent or 0.0
     discount_score = d / max_discount if max_discount > 0 else 0.0
 
+    if ranking_preferences:
+        price_weight = float(ranking_preferences.get("price", _WEIGHT_PRICE))
+        delivery_weight = float(ranking_preferences.get("delivery", _WEIGHT_DELIVERY))
+        rating_weight = float(ranking_preferences.get("rating", _WEIGHT_RATING))
+        discount_weight = float(ranking_preferences.get("discount", _WEIGHT_DISCOUNT))
+    else:
+        price_weight = _WEIGHT_PRICE
+        delivery_weight = _WEIGHT_DELIVERY
+        rating_weight = _WEIGHT_RATING
+        discount_weight = _WEIGHT_DISCOUNT
+
     return round(
-        _WEIGHT_PRICE * price_score
-        + _WEIGHT_DELIVERY * delivery_score
-        + _WEIGHT_RATING * rating_score
-        + _WEIGHT_DISCOUNT * discount_score,
+        price_weight * price_score
+        + delivery_weight * delivery_score
+        + rating_weight * rating_score
+        + discount_weight * discount_score,
         4,
     )
 
@@ -78,13 +93,17 @@ class RankingAgent:
     README: Core decision-making layer.
     """
 
-    async def run(self, unified_product: UnifiedProduct) -> RankingResult:
+    async def run(
+        self,
+        unified_product: UnifiedProduct,
+        ranking_preferences: Optional[Dict[str, float]] = None,
+    ) -> RankingResult:
         products = unified_product.platforms
         if not products:
             return RankingResult(entity=unified_product.entity)
 
         scored = [
-            (p, _score_product(p, products))
+            (p, _score_product(p, products, ranking_preferences=ranking_preferences))
             for p in products
             if p.in_stock
         ]

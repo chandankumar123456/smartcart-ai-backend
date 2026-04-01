@@ -16,9 +16,21 @@ def pipeline() -> AgentPipeline:
 
 
 class TestSearchPipeline:
+    async def _run_from_query(self, pipeline, query: str):
+        parsed = await pipeline.parse_query(query)
+        return await pipeline.run_search(parsed)
+
+    @pytest.mark.asyncio
+    async def test_parse_query_returns_strict_intelligence_output(self, pipeline):
+        parsed = await pipeline.parse_query("cheap milk under 60")
+        assert parsed.clean_query.normalized_text == "cheap milk under 60"
+        assert parsed.intent_result.intent.value == "product_search"
+        assert parsed.domain_guard.allowed is True
+        assert parsed.structured_query.product in {"packaged milk", "milk"}
+
     @pytest.mark.asyncio
     async def test_search_returns_final_response(self, pipeline):
-        result = await pipeline.run_search("milk")
+        result = await self._run_from_query(pipeline, "milk")
         assert result.query == "milk"
         assert isinstance(result.results, list)
         assert isinstance(result.best_option, dict)
@@ -30,20 +42,20 @@ class TestSearchPipeline:
 
     @pytest.mark.asyncio
     async def test_search_with_price_filter(self, pipeline):
-        result = await pipeline.run_search("milk under 30")
+        result = await self._run_from_query(pipeline, "milk under 30")
         for r in result.results:
             assert r["price"] <= 30.0
 
     @pytest.mark.asyncio
     async def test_search_best_option_present(self, pipeline):
-        result = await pipeline.run_search("rice")
+        result = await self._run_from_query(pipeline, "rice")
         assert result.best_option != {}
         assert "platform" in result.best_option
         assert "price" in result.best_option
 
     @pytest.mark.asyncio
     async def test_search_unknown_product_graceful(self, pipeline):
-        result = await pipeline.run_search("xyz_unknown_product_123")
+        result = await self._run_from_query(pipeline, "xyz_unknown_product_123")
         assert result.query == "xyz_unknown_product_123"
         assert result.results == []
         assert result.best_option == {}
@@ -51,60 +63,72 @@ class TestSearchPipeline:
 
     @pytest.mark.asyncio
     async def test_search_deals_detected_for_discounted_product(self, pipeline):
-        result = await pipeline.run_search("milk")
+        result = await self._run_from_query(pipeline, "milk")
         # Zepto milk has 12.5% discount — should appear as deal
         deal_platforms = {d["platform"] for d in result.deals}
         assert len(result.deals) >= 0  # may vary based on thresholds
 
     @pytest.mark.asyncio
     async def test_search_generic_chicken_returns_results(self, pipeline):
-        result = await pipeline.run_search("chicken")
+        result = await self._run_from_query(pipeline, "chicken")
         assert len(result.results) > 0
         assert result.total_price > 0
 
     @pytest.mark.asyncio
     async def test_search_generic_curd_alias_returns_results(self, pipeline):
-        result = await pipeline.run_search("dahi")
+        result = await self._run_from_query(pipeline, "dahi")
         assert len(result.results) > 0
 
     @pytest.mark.asyncio
     async def test_search_capsicum_returns_results(self, pipeline):
-        result = await pipeline.run_search("capsicum")
+        result = await self._run_from_query(pipeline, "capsicum")
         assert len(result.results) > 0
 
     @pytest.mark.asyncio
     async def test_search_atta_returns_results(self, pipeline):
-        result = await pipeline.run_search("atta")
+        result = await self._run_from_query(pipeline, "atta")
         assert len(result.results) > 0
 
     @pytest.mark.asyncio
     async def test_search_paneer_cubes_returns_results(self, pipeline):
-        result = await pipeline.run_search("paneer cubes")
+        result = await self._run_from_query(pipeline, "paneer cubes")
         assert len(result.results) > 0
 
     @pytest.mark.asyncio
     async def test_search_salad_leaves_returns_results(self, pipeline):
-        result = await pipeline.run_search("salad leaves")
+        result = await self._run_from_query(pipeline, "salad leaves")
         assert len(result.results) > 0
 
     @pytest.mark.asyncio
     async def test_search_evening_snacks_returns_results(self, pipeline):
-        result = await pipeline.run_search("something for evening snacks")
+        result = await self._run_from_query(pipeline, "something for evening snacks")
         assert len(result.results) > 0
         assert result.metadata.get("intent") == "exploratory"
 
     @pytest.mark.asyncio
     async def test_search_vague_multi_item_query_returns_results(self, pipeline):
-        result = await pipeline.run_search("need paneer cubes and salad leaves for dinner")
+        result = await self._run_from_query(pipeline, "need paneer cubes and salad leaves for dinner")
         assert len(result.results) > 0
 
     @pytest.mark.asyncio
     async def test_search_unsupported_query_returns_structured_unsupported(self, pipeline):
-        result = await pipeline.run_search("book me a flight to mumbai")
+        result = await self._run_from_query(pipeline, "book me a flight to mumbai")
         assert result.results == []
         assert result.best_option == {}
-        assert result.metadata.get("intent") == "unsupported"
-        assert "normalized_query" in result.metadata
+        assert result.metadata.get("domain_guard", {}).get("allowed") is False
+
+    @pytest.mark.asyncio
+    async def test_parse_query_multi_intent_generates_execution_plan(self, pipeline):
+        parsed = await pipeline.parse_query("plan tomato pasta and optimize my cart")
+        assert parsed.intent_result.intent.value == "recipe"
+        assert "cart_optimization" in [i.value for i in parsed.intent_result.secondary_intents]
+        assert parsed.execution_plan.mode == "recipe_then_cart_optimization"
+
+    @pytest.mark.asyncio
+    async def test_parse_query_ambiguity_has_candidates(self, pipeline):
+        parsed = await pipeline.parse_query("need paneer and salad")
+        assert parsed.ambiguity.needs_resolution is True
+        assert len(parsed.ambiguity.candidate_entities) >= 1
 
 
 class TestRecipePipeline:
@@ -152,7 +176,8 @@ class TestResponseFormat:
 
     @pytest.mark.asyncio
     async def test_search_response_has_required_fields(self, pipeline):
-        result = await pipeline.run_search("eggs")
+        parsed = await pipeline.parse_query("eggs")
+        result = await pipeline.run_search(parsed)
         d = result.model_dump()
         assert "query" in d
         assert "results" in d

@@ -75,9 +75,9 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------
     # Routers
     # ------------------------------------------------------------------
-    app.include_router(search.router, prefix="/ai", tags=["AI Search"])
-    app.include_router(recipe.router, prefix="/ai", tags=["AI Recipe"])
-    app.include_router(cart.router, prefix="/ai", tags=["AI Cart"])
+    app.include_router(search.router, tags=["AI Search"])
+    app.include_router(recipe.router, tags=["AI Recipe"])
+    app.include_router(cart.router, tags=["AI Cart"])
 
     # ------------------------------------------------------------------
     # Health check
@@ -96,7 +96,7 @@ def create_app() -> FastAPI:
         return {
             "name": settings.app_name,
             "version": settings.app_version,
-            "endpoints": ["/ai/search", "/ai/recipe", "/ai/cart-optimize"],
+            "endpoints": ["/parse-query", "/search", "/recipe", "/cart-optimization"],
             "docs": "/docs",
         }
 
