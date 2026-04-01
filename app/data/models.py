@@ -133,6 +133,30 @@ class ExecutionPlan(BaseModel):
     reason: str = ""
 
 
+class UserContext(BaseModel):
+    user_id: str = ""
+    preferences: List[str] = Field(default_factory=list)
+    dietary_patterns: List[str] = Field(default_factory=list)
+    budget_habits: Dict[str, Any] = Field(default_factory=dict)
+    historical_behavior: Dict[str, Any] = Field(default_factory=dict)
+
+
+class LearningSignals(BaseModel):
+    normalization_reinforced: List[str] = Field(default_factory=list)
+    failed_matches: List[str] = Field(default_factory=list)
+    ranking_adjustments: Dict[str, float] = Field(default_factory=dict)
+    constraint_violations: List[str] = Field(default_factory=list)
+    evaluation_notes: List[str] = Field(default_factory=list)
+    retry_count: int = 0
+
+
+class EvaluationResult(BaseModel):
+    success: bool = True
+    should_retry: bool = False
+    failure_signals: List[str] = Field(default_factory=list)
+    correction_suggestions: List[str] = Field(default_factory=list)
+
+
 class StructuredQuery(BaseModel):
     """Output of QueryUnderstandingAgent."""
 
@@ -165,6 +189,8 @@ class FinalStructuredQuery(BaseModel):
     ambiguity: AmbiguityDecision = Field(default_factory=AmbiguityDecision)
     fallback: FallbackDecision
     execution_plan: ExecutionPlan = Field(default_factory=ExecutionPlan)
+    user_context: UserContext = Field(default_factory=UserContext)
+    learning_signals: LearningSignals = Field(default_factory=LearningSignals)
     structured_query: StructuredQuery
 
 

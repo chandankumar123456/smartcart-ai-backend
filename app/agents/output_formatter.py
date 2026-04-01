@@ -10,10 +10,12 @@ from app.data.models import (
     FinalStructuredQuery,
     FallbackDecision,
     IntentResult,
+    LearningSignals,
     NormalizedEntities,
     RawEntities,
     StructuredQuery,
     CleanQuery,
+    UserContext,
 )
 
 
@@ -29,6 +31,8 @@ class OutputFormatterAgent:
         ambiguity: AmbiguityDecision,
         fallback: FallbackDecision,
         execution_plan: ExecutionPlan,
+        user_context: UserContext,
+        learning_signals: LearningSignals,
         structured_query: StructuredQuery,
     ) -> FinalStructuredQuery:
         return FinalStructuredQuery(
@@ -41,5 +45,7 @@ class OutputFormatterAgent:
             ambiguity=ambiguity,
             fallback=fallback,
             execution_plan=execution_plan,
+            user_context=user_context,
+            learning_signals=learning_signals,
             structured_query=structured_query,
         )

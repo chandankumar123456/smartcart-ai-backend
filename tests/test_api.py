@@ -135,7 +135,17 @@ class TestSearchEndpoint:
         assert "ambiguity" in data
         assert "fallback" in data
         assert "execution_plan" in data
+        assert "user_context" in data
+        assert "learning_signals" in data
         assert "structured_query" in data
+
+    def test_execute_endpoint_accepts_final_structured_query(self, client):
+        payload = self._parse_payload(client, "milk")
+        response = client.post("/execute", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert "results" in data
+        assert "metadata" in data
 
     def test_parse_query_multi_intent_contains_secondary_intents(self, client):
         response = client.post("/parse-query", json={"query": "plan pasta and optimize my cart"})

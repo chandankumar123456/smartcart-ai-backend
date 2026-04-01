@@ -71,3 +71,20 @@ async def search(
 
     await cache.set("search", cache_key, result.model_dump())
     return result
+
+
+@router.post(
+    "/execute",
+    response_model=FinalResponse,
+    summary="Execute finalized structured grocery intelligence",
+    description=(
+        "Alias for /search execution contract. Accepts FinalStructuredQuery only "
+        "and executes matching/ranking/deals without receiving raw user text."
+    ),
+)
+async def execute(
+    body: FinalStructuredQuery,
+    request: Request,
+    _api_key: str = Depends(verify_api_key),
+) -> FinalResponse:
+    return await search(body, request, _api_key)

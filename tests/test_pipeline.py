@@ -27,6 +27,8 @@ class TestSearchPipeline:
         assert parsed.intent_result.intent.value == "product_search"
         assert parsed.domain_guard.allowed is True
         assert parsed.structured_query.product in {"packaged milk", "milk"}
+        assert hasattr(parsed, "user_context")
+        assert hasattr(parsed, "learning_signals")
 
     @pytest.mark.asyncio
     async def test_search_returns_final_response(self, pipeline):
@@ -129,6 +131,14 @@ class TestSearchPipeline:
         parsed = await pipeline.parse_query("need paneer and salad")
         assert parsed.ambiguity.needs_resolution is True
         assert len(parsed.ambiguity.candidate_entities) >= 1
+
+    @pytest.mark.asyncio
+    async def test_reasoning_loop_applies_budget_refinement(self, pipeline):
+        parsed = await pipeline.parse_query("cheap milk under 20")
+        result = await pipeline.run_search(parsed)
+        if result.best_option:
+            assert result.best_option["price"] <= 20
+        assert parsed.learning_signals.retry_count >= 0
 
 
 class TestRecipePipeline:

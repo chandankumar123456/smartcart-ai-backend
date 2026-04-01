@@ -21,6 +21,7 @@ from app.agents.constraint_extraction import ConstraintExtractionAgent
 from app.agents.deal_detection import DealDetectionAgent
 from app.agents.domain_guard import DomainGuardAgent
 from app.agents.ambiguity_reasoning import AmbiguityReasoningAgent
+from app.agents.evaluation import EvaluationAgent
 from app.agents.entity_extraction import EntityExtractionAgent
 from app.agents.execution_planner import ExecutionPlannerAgent
 from app.agents.intent_detection import IntentDetectionAgent
@@ -34,6 +35,7 @@ from app.agents.query_understanding import QueryUnderstandingAgent
 from app.agents.ranking import RankingAgent
 from app.agents.recipe import RecipeAgent
 from app.agents.synonym_memory import SynonymMemoryAgent
+from app.agents.user_context import UserContextAgent
 from app.data.layer import get_products_for_entity
 from app.data.models import (
     CartItem,
@@ -45,6 +47,8 @@ from app.data.models import (
     QueryFilters,
     QueryMetadata,
     QueryIntent,
+    LearningSignals,
+    EvaluationResult,
     QueryConstraints,
     RecipeResult,
     StructuredItem,
@@ -55,6 +59,7 @@ from app.llm.manager import LLMManager, get_llm_manager
 from app.response.builder import ResponseBuilder
 
 logger = logging.getLogger(__name__)
+_MAX_REASONING_RETRIES = 1
 
 
 class AgentPipeline:
@@ -75,6 +80,8 @@ class AgentPipeline:
         self._domain_guard_agent = DomainGuardAgent()
         self._ambiguity_agent = AmbiguityReasoningAgent()
         self._execution_planner_agent = ExecutionPlannerAgent()
+        self._evaluation_agent = EvaluationAgent()
+        self._user_context_agent = UserContextAgent()
         self._fallback_agent = FallbackAgent()
         self._formatter_agent = OutputFormatterAgent()
         self._query_logger = QueryLoggingAgent()
@@ -112,6 +119,16 @@ class AgentPipeline:
         await self._query_logger.run("fallback", fallback.model_dump())
         execution_plan = await self._execution_planner_agent.run(intent_result)
         await self._query_logger.run("execution_planning", execution_plan.model_dump())
+        user_context = await self._user_context_agent.run(clean_query)
+        await self._query_logger.run("user_context", user_context.model_dump())
+        learning_signals = LearningSignals(
+            normalization_reinforced=[e.canonical_name for e in normalized_entities.entities if e.canonical_name],
+            failed_matches=list(normalized_entities.unresolved_entities),
+            ranking_adjustments=dict(constraints.ranking_preference_weights),
+            constraint_violations=list(constraints.conflict_notes),
+            evaluation_notes=[],
+            retry_count=0,
+        )
 
         primary_normalized_entity = normalized_entities.entities[0] if normalized_entities.entities else None
         primary_entity = primary_normalized_entity.canonical_name if primary_normalized_entity else ""
@@ -149,6 +166,8 @@ class AgentPipeline:
             ambiguity=ambiguity,
             fallback=fallback,
             execution_plan=execution_plan,
+            user_context=user_context,
+            learning_signals=learning_signals,
             structured_query=structured_query,
         )
         await self._query_logger.run("output_formatter", final_structured.model_dump())
@@ -200,6 +219,35 @@ class AgentPipeline:
         state["deal_result"] = await self._deal_agent.run(state["unified_product"])
         logger.debug("[DEALS] deals_count=%s", len(state["deal_result"].deals))
 
+        response = self._builder.build_search_response(state)
+        evaluation: EvaluationResult = await self._evaluation_agent.run(final_structured, response)
+        retries = 0
+        while evaluation.should_retry and retries < _MAX_REASONING_RETRIES:
+            retries += 1
+            final_structured.learning_signals.retry_count = retries
+            final_structured.learning_signals.evaluation_notes.extend(evaluation.correction_suggestions)
+            if "constraint_violation" in evaluation.failure_signals and final_structured.constraints.budget:
+                budget_amount = float(final_structured.constraints.budget.get("amount", 0))
+                if budget_amount > 0:
+                    filtered = [
+                        item for item in state["ranking_result"].ranked_list
+                        if item.product.price <= budget_amount
+                    ]
+                    state["ranking_result"].ranked_list = filtered
+                    state["ranking_result"].best_option = filtered[0] if filtered else None
+            if "ambiguity_failure" in evaluation.failure_signals and final_structured.ambiguity.candidate_entities:
+                fallback_entity = final_structured.ambiguity.candidate_entities[0]
+                state["normalized_item"] = await self._normalization_agent.run(fallback_entity)
+                state["unified_product"] = await self._product_agent.run(sq, state["normalized_item"])
+                state["ranking_result"] = await self._ranking_agent.run(
+                    state["unified_product"],
+                    ranking_preferences=final_structured.constraints.ranking_preference_weights,
+                )
+                state["deal_result"] = await self._deal_agent.run(state["unified_product"])
+            response = self._builder.build_search_response(state)
+            evaluation = await self._evaluation_agent.run(final_structured, response)
+        await self._query_logger.run("evaluation", evaluation.model_dump())
+        state["final_structured_query"] = final_structured
         response = self._builder.build_search_response(state)
         logger.debug(
             "[FINAL_OUTPUT] result_count=%s total_price=%s deals=%s",
