@@ -70,6 +70,7 @@ class ResponseBuilder:
         ranking = state.get("ranking_result")
         deal_result = state.get("deal_result")
         final_structured = state.get("final_structured_query")
+        unified_product = state.get("unified_product")
 
         results = []
         if ranking:
@@ -154,6 +155,9 @@ class ResponseBuilder:
                 ),
                 "structured_intelligence": (
                     final_structured.model_dump() if final_structured else {}
+                ),
+                "matching": (
+                    unified_product.diagnostics.model_dump() if unified_product else {}
                 ),
             },
         )

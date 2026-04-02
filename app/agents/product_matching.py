@@ -13,11 +13,13 @@ Output: UnifiedProduct (list of PlatformProduct per platform)
 import logging
 
 from app.core.exceptions import AgentException
-from app.data.layer import match_products_for_entity
-from app.data.models import NormalizedItem, PlatformProduct, QueryFilters, StructuredQuery, UnifiedProduct
+import app.data.layer as data_layer
+from app.agents.tools.product_intelligence import ProductIntelligenceContext, ProductIntelligenceRegistry
+from app.data.models import MatchingDiagnostics, NormalizedItem, PlatformProduct, QueryFilters, StructuredQuery, UnifiedProduct
 
 logger = logging.getLogger(__name__)
 TOP_K_FALLBACK = 3
+_MIN_HIGH_QUALITY_RESULTS = 2
 
 
 class ProductMatchingAgent:
@@ -36,14 +38,69 @@ class ProductMatchingAgent:
         if not entity:
             raise AgentException("ProductMatchingAgent", "No product entity provided")
 
-        variants = normalized_item.possible_variants if normalized_item else None
+        variants = normalized_item.possible_variants if normalized_item else []
         category = normalized_item.category if normalized_item else None
-        products, match_meta = match_products_for_entity(entity, possible_variants=variants, category=category)
+        expanded_terms = data_layer._expand_query_terms(entity)
+        for variant in variants:
+            expanded_terms.extend(data_layer._expand_query_terms(variant))
+        expanded_terms = data_layer._unique(expanded_terms)
+        diagnostics = MatchingDiagnostics(
+            input_term=entity,
+            expanded_terms=expanded_terms,
+            matched_via="db",
+            fallback_trace=["db_lookup"],
+        )
+        products = data_layer._search_db_products(expanded_terms, category)
+        diagnostics.matched_keys = data_layer._unique([p.normalized_name for p in products])
+        self._update_source_breakdown(diagnostics, products)
+        weak_match = self._is_weak_match(entity, products)
+        if not products:
+            diagnostics.fallback_trace.append("db_empty")
+        elif weak_match:
+            diagnostics.fallback_trace.append("db_low_coverage")
+
+        if not products or weak_match:
+            context = ProductIntelligenceContext(
+                entity=entity,
+                raw_query=structured_query.raw_query,
+                expanded_terms=expanded_terms,
+                category=category,
+            )
+            tool_products, attempts = await self._tool_registry.fetch(context)
+            diagnostics.tool_attempts.extend(attempts)
+            if tool_products:
+                diagnostics.fallback_trace.append("tool_enrichment")
+                diagnostics.matched_via = self._infer_primary_source(tool_products)
+                diagnostics.approximate_match = any(
+                    product.source == "approximation" for product in tool_products
+                )
+                if diagnostics.approximate_match and "approximation" not in diagnostics.fallback_trace:
+                    diagnostics.fallback_trace.append("approximation")
+                products = self._dedupe_products(products + tool_products)
+                self._update_source_breakdown(diagnostics, products)
+
+        if not products:
+            diagnostics.fallback_trace.append("approximation")
+            approximate_products = await self._tool_registry.approximate(
+                ProductIntelligenceContext(
+                    entity=entity,
+                    raw_query=structured_query.raw_query,
+                    expanded_terms=expanded_terms,
+                    category=category or self._infer_category(expanded_terms),
+                )
+            )
+            if approximate_products:
+                diagnostics.approximate_match = True
+                diagnostics.matched_via = "approximation"
+                products = self._dedupe_products(approximate_products)
+                diagnostics.matched_keys = data_layer._unique([p.normalized_name for p in products])
+                self._update_source_breakdown(diagnostics, products)
+
         logger.debug(
             "[MATCHING] input_term=%s expanded_terms=%s matches_found=%s matched_products=%s",
-            match_meta["input_term"],
-            match_meta["expanded_terms"],
-            len(match_meta["matched_keys"]),
+            diagnostics.input_term,
+            diagnostics.expanded_terms,
+            len(diagnostics.matched_keys),
             [p.name for p in products],
         )
 
@@ -56,22 +113,95 @@ class ProductMatchingAgent:
             fallback_triggered = True
             fallback_reason = "relax_filters_top_k"
             filtered_products = sorted(products, key=lambda p: p.price)[:TOP_K_FALLBACK]
-
-        if match_meta["fallback_triggered"]:
-            fallback_triggered = True
-            fallback_reason = match_meta["fallback_reason"] or fallback_reason
+            diagnostics.fallback_trace.append(fallback_reason)
+        elif not filtered_products:
+            diagnostics.fallback_trace.append("no_usable_products")
 
         logger.debug(
             "[FALLBACK] triggered=%s reason=%s",
             fallback_triggered,
             fallback_reason,
         )
+        diagnostics.quality_score = self._compute_quality_score(entity, filtered_products or products, diagnostics)
 
         return UnifiedProduct(
             entity=entity,
             normalized_name=entity.lower().strip(),
             platforms=filtered_products,
+            diagnostics=diagnostics,
         )
+
+    def __init__(self) -> None:
+        self._tool_registry = ProductIntelligenceRegistry()
+
+    @staticmethod
+    def _is_weak_match(entity: str, products: list[PlatformProduct]) -> bool:
+        if not products:
+            return True
+        exact_hits = [
+            p for p in products
+            if p.normalized_name == entity.lower().strip() or entity.lower().strip() in p.name.lower()
+        ]
+        return len(exact_hits) < 1
+
+    @staticmethod
+    def _dedupe_products(products: list[PlatformProduct]) -> list[PlatformProduct]:
+        deduped: list[PlatformProduct] = []
+        seen = set()
+        for product in products:
+            key = (
+                product.platform.value,
+                product.product_id or "",
+                product.url or "",
+                product.normalized_name,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(product)
+        return deduped
+
+    @staticmethod
+    def _infer_primary_source(products: list[PlatformProduct]) -> str:
+        if not products:
+            return "db"
+        counts: dict[str, int] = {}
+        for product in products:
+            counts[product.source] = counts.get(product.source, 0) + 1
+        return max(counts, key=counts.get)
+
+    @staticmethod
+    def _update_source_breakdown(diagnostics: MatchingDiagnostics, products: list[PlatformProduct]) -> None:
+        counts: dict[str, int] = {}
+        for product in products:
+            counts[product.source] = counts.get(product.source, 0) + 1
+        diagnostics.source_breakdown = counts
+
+    @staticmethod
+    def _infer_category(expanded_terms: list[str]) -> str | None:
+        for term in expanded_terms:
+            category = data_layer._TERM_TO_CATEGORY.get(term)
+            if category:
+                return category
+        return None
+
+    @staticmethod
+    def _compute_quality_score(
+        entity: str,
+        products: list[PlatformProduct],
+        diagnostics: MatchingDiagnostics,
+    ) -> float:
+        if not products:
+            return 0.0
+        exact_hits = sum(
+            1 for p in products
+            if p.normalized_name == entity.lower().strip() or entity.lower().strip() in p.name.lower()
+        )
+        source_bonus = 0.15 if diagnostics.matched_via == "db" else 0.1
+        approximate_penalty = 0.25 if diagnostics.approximate_match else 0.0
+        coverage_score = min(0.5, len(products) * 0.1)
+        exact_score = min(0.4, exact_hits * 0.2)
+        return max(0.0, min(1.0, round(source_bonus + coverage_score + exact_score - approximate_penalty, 4)))
 
     @staticmethod
     def _apply_filters(

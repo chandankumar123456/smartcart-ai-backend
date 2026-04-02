@@ -73,6 +73,7 @@ _MIN_OPTIMIZATION_SCORE = 0.2
 _GLOBAL_OPTIMIZATION_DELIVERY_WEIGHT = 0.2
 _DEFAULT_DELIVERY_MINUTES = 30.0
 _MAX_DELIVERY_MINUTES = 90.0
+_MATCHING_QUALITY_THRESHOLD = 0.45
 
 
 class AgentPipeline:
@@ -280,6 +281,22 @@ class AgentPipeline:
                 normalized = await self._normalization_agent.run(entity)
                 path_state["normalized_item"] = normalized
                 path_state["unified_product"] = await self._product_agent.run(sq, normalized)
+                matching = path_state["unified_product"].diagnostics
+                if (
+                    (
+                        not path_state["unified_product"].platforms
+                        or matching.quality_score < _MATCHING_QUALITY_THRESHOLD
+                    )
+                    and normalized.possible_variants
+                ):
+                    extra_candidates = [
+                        candidate for candidate in normalized.possible_variants
+                        if candidate not in candidate_entities
+                    ]
+                    if extra_candidates:
+                        candidate_entities = self._sanitize_candidate_entities(
+                            candidate_entities + extra_candidates
+                        )
                 live_entity = market_signals.get(normalized.canonical_name, {}) if isinstance(market_signals, dict) else {}
                 if live_entity.get("in_stock") is False:
                     alt_candidates = [c for c in candidate_entities if c != entity]
@@ -327,7 +344,9 @@ class AgentPipeline:
             final_structured.learning_signals.evaluation_notes.extend(best_eval.correction_suggestions)
             if "poor_match_quality" in best_eval.failure_signals:
                 candidate_entities = self._sanitize_candidate_entities(
-                    candidate_entities + (final_structured.ambiguity.candidate_entities or [])
+                    candidate_entities
+                    + (final_structured.ambiguity.candidate_entities or [])
+                    + [variant for e in final_structured.normalized_entities.entities for variant in e.possible_variants]
                 )
             if "constraint_violation" in best_eval.failure_signals:
                 final_structured.constraints.ranking_preference_weights = self._constraint_optimizer.derive_weights(

@@ -33,17 +33,26 @@ class ExecutionPlannerAgent:
         plan_id = f"plan-{uuid.uuid4().hex[:8]}"
         nodes: list[ExecutionNode] = [
             ExecutionNode(node_id="match", operation="product_matching"),
+            ExecutionNode(
+                node_id="enrich",
+                operation="tool_enrichment",
+                depends_on=["match"],
+                condition="if_match_empty_or_low_quality",
+            ),
             ExecutionNode(node_id="rank", operation="ranking", depends_on=["match"]),
             ExecutionNode(node_id="deals", operation="deal_detection", depends_on=["rank"]),
         ]
         edges = [
             {"from": "match", "to": "rank"},
+            {"from": "match", "to": "enrich"},
+            {"from": "enrich", "to": "rank"},
             {"from": "rank", "to": "deals"},
         ]
         adaptive_flags = {
             "skip_deals": "cheap" in constraints.preferences,
             "skip_ranking": primary == QueryIntent.exploratory and intent_result.confidence < 0.6,
             "personalized_weights": bool(user_context.preferences or user_context.dietary_patterns),
+            "tool_enrichment": True,
         }
         if adaptive_flags["skip_deals"]:
             nodes = [n for n in nodes if n.node_id != "deals"]

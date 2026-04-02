@@ -31,10 +31,19 @@ class EvaluationAgent:
         )
         if not response.results:
             if has_single_clear_entity:
-                corrections.append("mark_entity_unavailable_without_retry")
+                add_signal("poor_match_quality", "escalate_tool_enrichment")
+                corrections.append("expand_entity_variants")
             else:
                 add_signal("ambiguity_failure", "branch_with_candidate_entities")
                 add_signal("poor_match_quality", "expand_entity_variants")
+        matching = response.metadata.get("matching", {}) if isinstance(response.metadata, dict) else {}
+        if matching:
+            quality_score = float(matching.get("quality_score", 0.0) or 0.0)
+            approximate = bool(matching.get("approximate_match", False))
+            if quality_score < 0.35 and not response.results:
+                add_signal("poor_match_quality", "escalate_tool_enrichment")
+            elif approximate and quality_score < 0.45:
+                add_signal("poor_match_quality", "broaden_approximation")
 
         if parsed.constraints.budget and response.best_option:
             amount_raw = parsed.constraints.budget.get("amount")

@@ -76,9 +76,10 @@ class TestSearchPipeline:
     async def test_search_unknown_product_graceful(self, pipeline):
         result = await self._run_from_query(pipeline, "xyz_unknown_product_123")
         assert result.query == "xyz_unknown_product_123"
-        assert result.results == []
-        assert result.best_option == {}
+        assert len(result.results) > 0
+        assert result.best_option != {}
         assert result.metadata.get("intent") in {"product_search", "exploratory"}
+        assert result.metadata.get("matching", {}).get("approximate_match") is True
 
     @pytest.mark.asyncio
     async def test_search_deals_detected_for_discounted_product(self, pipeline):
@@ -134,6 +135,14 @@ class TestSearchPipeline:
         result = await self._run_from_query(pipeline, "something for evening snacks")
         assert len(result.results) > 0
         assert result.metadata.get("intent") == "exploratory"
+
+    @pytest.mark.asyncio
+    async def test_search_response_includes_matching_provenance(self, pipeline):
+        result = await self._run_from_query(pipeline, "milk")
+        matching = result.metadata.get("matching", {})
+        assert "matched_via" in matching
+        assert "quality_score" in matching
+        assert "fallback_trace" in matching
 
     @pytest.mark.asyncio
     async def test_search_vague_multi_item_query_returns_results(self, pipeline):

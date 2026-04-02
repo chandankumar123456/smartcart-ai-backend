@@ -278,6 +278,7 @@ class Platform(str, Enum):
     bigbasket = "bigbasket"
     jiomart = "jiomart"
     dmart = "dmart"
+    external = "external"
 
 
 class PlatformProduct(BaseModel):
@@ -298,12 +299,32 @@ class PlatformProduct(BaseModel):
     source: str = "db"
 
 
+class ToolAttempt(BaseModel):
+    tool_name: str
+    success: bool = False
+    result_count: int = 0
+    error: str = ""
+
+
+class MatchingDiagnostics(BaseModel):
+    input_term: str = ""
+    expanded_terms: List[str] = Field(default_factory=list)
+    matched_keys: List[str] = Field(default_factory=list)
+    matched_via: str = "db"
+    fallback_trace: List[str] = Field(default_factory=list)
+    tool_attempts: List[ToolAttempt] = Field(default_factory=list)
+    approximate_match: bool = False
+    quality_score: float = 0.0
+    source_breakdown: Dict[str, int] = Field(default_factory=dict)
+
+
 class UnifiedProduct(BaseModel):
     """Output of ProductMatchingAgent — same product across platforms."""
 
     entity: str
     normalized_name: str = ""
     platforms: List[PlatformProduct] = Field(default_factory=list)
+    diagnostics: MatchingDiagnostics = Field(default_factory=MatchingDiagnostics)
 
 
 # ---------------------------------------------------------------------------
