@@ -52,5 +52,8 @@ class SearchGraphState(TypedDict, total=False):
     budget_limit: float | None
     path_history: List[Dict[str, Any]]
     decision_trace: List[Dict[str, Any]]
+    collaborative_proposals: List[Dict[str, Any]]
+    collaborative_critiques: List[Dict[str, Any]]
+    synthesis_trace: Dict[str, Any]
     tool_attempts: List[ToolAttempt]
     max_retries: int

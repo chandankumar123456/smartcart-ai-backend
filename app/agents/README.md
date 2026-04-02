@@ -99,11 +99,14 @@ Additional parse-time operations:
    - `market_signals`
    - `retry_count`
    - `decision_trace`
+   - `collaborative_proposals`
+   - `collaborative_critiques`
+   - `synthesis_trace`
    - `tool_trace`
    - `tool_request`
    - `tool_result`
 5. Invokes the compiled LangGraph runtime:
-   - `controller_node` -> controller agent decides the next action from accumulated state
+   - `controller_node` -> controller agent decides the next action from accumulated state using collaborative proposal, critique, and synthesis reasoning with deterministic fallback
    - `normalization_node` -> `NormalizationAgent.act`
    - `product_matching_node` -> `ProductMatchingAgent.act`
    - `tool_execution_node` -> executes tool requests emitted by `ProductMatchingAgent`
@@ -279,6 +282,9 @@ The controller-driven graph records:
 - `retry_count`
 - `match_quality`
 - `path_history`
+- `collaborative_proposals`
+- `collaborative_critiques`
+- `synthesis_trace`
 
 These fields are preserved into final response metadata for debugging and evaluation.
 

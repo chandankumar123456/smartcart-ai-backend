@@ -94,7 +94,12 @@ High-level behavior:
 1. Enforce `domain_guard`, unsupported intent, and recipe delegation gates for compatibility.
 2. Seed `SearchGraphState` from `FinalStructuredQuery`, policy overlays, market signals, and retry limits.
 3. Enter `controller_node`, which acts as the runtime decision-maker for search execution.
-4. Let the controller dynamically choose among:
+4. Inside `controller_node`, lightweight reasoning agents collaborate to:
+   - propose candidate next actions
+   - critique proposals against runtime evidence
+   - synthesize a final action using consensus and score aggregation
+5. If collaborative LLM reasoning is unavailable or returns an invalid action, the controller falls back to deterministic routing.
+6. Let the controller dynamically choose among:
    - `parse_query_node`
    - `normalization_node`
    - `product_matching_node`
@@ -104,13 +109,14 @@ High-level behavior:
    - `ranking_node`
    - `deal_detection_node`
    - `response_node`
-5. Return control to `controller_node` after every action node until termination.
-6. Cap retries with `retry_count` and `_MAX_ENRICHMENT_RETRY_ATTEMPTS = 2`.
-7. Preserve budget filtering, coordination metadata, learning updates, and event emission after graph completion.
+7. Return control to `controller_node` after every action node until termination.
+8. Cap retries with `retry_count` and `_MAX_ENRICHMENT_RETRY_ATTEMPTS = 2`.
+9. Preserve budget filtering, coordination metadata, learning updates, and event emission after graph completion.
 
 ### Agent-driven search state
 The search runtime uses an execution-only state contract (`app/orchestrator/state.py`) that carries:
 - control fields: `current_step`, `next_action`, `last_observation`, `decision_trace`
+- collaborative reasoning fields: `collaborative_proposals`, `collaborative_critiques`, `synthesis_trace`
 - tool fields: `tool_request`, `tool_result`, `tool_trace`
 - search artifacts: `normalized_item`, `unified_product`, `ranked_products`, `deals`, `response`
 - routing data: `candidate_entities`, `current_entity`, `selected_path`, `retry_count`, `match_quality`
@@ -240,7 +246,7 @@ Search result rows include runtime provenance and URL state:
 
 Search metadata also exposes graph/runtime observability:
 - `matching` -> matching diagnostics (`matched_via`, `fallback_trace`, `tool_attempts`, `approximate_match`, `quality_score`)
-- `search_graph` -> graph routing metadata (`match_quality`, `retry_count`, `selected_path`, `tool_trace`, `path_history`, `decision_trace`)
+- `search_graph` -> graph routing metadata (`match_quality`, `retry_count`, `selected_path`, `tool_trace`, `path_history`, `decision_trace`, `collaborative_proposals`, `collaborative_critiques`, `synthesis_trace`)
 
 ---
 

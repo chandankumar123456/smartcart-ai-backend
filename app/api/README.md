@@ -90,7 +90,11 @@ Handler: `search(body: FinalStructuredQuery, request: Request, _api_key=Depends(
 5. On hit: return cached `FinalResponse`
 6. On miss: `pipeline.run_search(body)`
 7. `run_search` seeds graph state and enters the controller-driven LangGraph runtime
-7. Cache write and return
+8. `controller_node` now performs collaborative reasoning before each route decision:
+   - proposal agents suggest actions
+   - critique agents score proposal quality
+   - a synthesis step selects the final action or falls back deterministically
+9. Cache write and return
 
 > `/search` does not accept raw natural language text.
 
@@ -235,7 +239,7 @@ Each product row includes:
 
 Search response metadata includes:
 - `matching` -> `matched_via`, `fallback_trace`, `tool_attempts`, `approximate_match`, `quality_score`, `source_breakdown`
-- `search_graph` -> `match_quality`, `retry_count`, `selected_path`, `tool_trace`, `path_history`, `decision_trace`
+- `search_graph` -> `match_quality`, `retry_count`, `selected_path`, `tool_trace`, `path_history`, `decision_trace`, `collaborative_proposals`, `collaborative_critiques`, `synthesis_trace`
 - `platform_signals` and `coordination_trace` -> orchestration overlays preserved from parse/execution
 
 ### Tool usage observability

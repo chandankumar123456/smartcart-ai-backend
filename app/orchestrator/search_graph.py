@@ -17,7 +17,10 @@ if TYPE_CHECKING:
 def build_search_execution_graph(pipeline: "AgentPipeline"):
     """Build the compiled controller-driven search execution graph."""
 
-    controller_agent = ControllerAgent(max_retries=pipeline._max_enrichment_retry_attempts)
+    controller_agent = ControllerAgent(
+        max_retries=pipeline._max_enrichment_retry_attempts,
+        llm_manager=pipeline._llm_manager,
+    )
 
     def clone_diagnostics(state: SearchGraphState) -> MatchingDiagnostics:
         return (state.get("diagnostics") or MatchingDiagnostics()).model_copy(deep=True)
@@ -213,6 +216,9 @@ def build_search_execution_graph(pipeline: "AgentPipeline"):
             tool_trace=state.get("tool_trace", []),
             path_history=state.get("path_history", []),
             decision_trace=state.get("decision_trace", []),
+            collaborative_proposals=state.get("collaborative_proposals", []),
+            collaborative_critiques=state.get("collaborative_critiques", []),
+            synthesis_trace=state.get("synthesis_trace", {}),
         )
         if evaluation_result.success:
             await pipeline._learning_loop.learn_from_success(final_structured)

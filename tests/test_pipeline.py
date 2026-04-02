@@ -1,6 +1,7 @@
 """Integration tests for the full agent pipeline."""
 
 import pytest
+import re
 from unittest.mock import AsyncMock
 
 from app.data.models import (
@@ -236,6 +237,9 @@ class TestSearchPipeline:
         assert isinstance(graph_meta.get("tool_trace"), list)
         assert isinstance(graph_meta.get("decision_trace"), list)
         assert graph_meta.get("decision_trace")
+        assert isinstance(graph_meta.get("collaborative_proposals"), list)
+        assert isinstance(graph_meta.get("collaborative_critiques"), list)
+        assert isinstance(graph_meta.get("synthesis_trace"), dict)
 
     @pytest.mark.asyncio
     async def test_search_graph_retry_count_caps_at_two(self, pipeline):
@@ -280,6 +284,59 @@ class TestSearchPipeline:
         actions = [entry.get("action") for entry in decision_trace]
         assert "tool_execution_node" in actions
         assert result.metadata.get("search_graph", {}).get("tool_trace")
+
+    @pytest.mark.asyncio
+    async def test_search_graph_surfaces_collaborative_controller_traces(self):
+        async def collaborative_call(prompt: str, schema_example: str | None = None, response_model=None):
+            if "collaborative controller proposal" in prompt:
+                fallback_match = re.search(r'"fallback_action":\s*"([^"]+)"', prompt)
+                action = fallback_match.group(1) if fallback_match else "response_node"
+                return {
+                    "role": "routing_strategist",
+                    "action": action,
+                    "rationale": "Use the deterministic-safe route for this state.",
+                    "confidence": 0.8,
+                    "evidence": ["available_actions", "fallback_action"],
+                }
+            if "collaborative controller critique" in prompt:
+                proposal_match = re.search(r'"action":\s*"([^"]+)"', prompt)
+                action = proposal_match.group(1) if proposal_match else "response_node"
+                return {
+                    "critic_role": "feasibility_critic",
+                    "proposal_action": action,
+                    "score": 0.7,
+                    "verdict": "support",
+                    "strengths": ["Action is valid"],
+                    "risks": [],
+                    "recommended_adjustments": [],
+                }
+            if "collaborative controller synthesis" in prompt:
+                fallback_match = re.search(r'"fallback_action":\s*"([^"]+)"', prompt)
+                action = fallback_match.group(1) if fallback_match else "response_node"
+                return {
+                    "action": action,
+                    "rationale": "Consensus selected the safe action.",
+                    "confidence": 0.78,
+                    "consensus": "majority_support",
+                    "score_breakdown": {action: 1.5},
+                }
+            raise Exception("LLM not configured in tests")
+
+        mock_llm = AsyncMock()
+        mock_llm.call.side_effect = collaborative_call
+        pipeline = AgentPipeline(llm_manager=mock_llm)
+
+        parsed = await pipeline.parse_query("milk")
+        result = await pipeline.run_search(parsed)
+
+        graph_meta = result.metadata.get("search_graph", {})
+        assert graph_meta.get("collaborative_proposals")
+        assert graph_meta.get("collaborative_critiques")
+        assert graph_meta.get("synthesis_trace", {}).get("consensus") == "majority_support"
+        assert any(
+            entry.get("decision_source") == "collaborative_llm"
+            for entry in graph_meta.get("decision_trace", [])
+        )
 
     @pytest.mark.asyncio
     async def test_parse_query_includes_platform_signals_and_coordination_trace(self, pipeline):

@@ -94,6 +94,7 @@ class AgentPipeline:
 
     def __init__(self, llm_manager: Optional[LLMManager] = None) -> None:
         llm = llm_manager or get_llm_manager()
+        self._llm_manager = llm
         self._synonym_memory = SynonymMemoryAgent()
         self._language_agent = LanguageProcessingAgent()
         self._intent_agent = IntentDetectionAgent()
@@ -300,6 +301,9 @@ class AgentPipeline:
                 "path_history": [],
                 "decision_trace": [],
                 "tool_trace": [],
+                "collaborative_proposals": [],
+                "collaborative_critiques": [],
+                "synthesis_trace": {},
                 "tool_request": None,
                 "tool_result": None,
                 "preliminary_products": [],
@@ -454,6 +458,9 @@ class AgentPipeline:
         tool_trace: List[Dict[str, Any]],
         path_history: List[Dict[str, Any]],
         decision_trace: List[Dict[str, Any]],
+        collaborative_proposals: List[Dict[str, Any]],
+        collaborative_critiques: List[Dict[str, Any]],
+        synthesis_trace: Dict[str, Any],
     ) -> None:
         if final_structured.user_context.predicted_needs:
             response.metadata["predicted_needs"] = final_structured.user_context.predicted_needs
@@ -466,6 +473,9 @@ class AgentPipeline:
             "tool_trace": tool_trace,
             "path_history": path_history,
             "decision_trace": decision_trace,
+            "collaborative_proposals": collaborative_proposals,
+            "collaborative_critiques": collaborative_critiques,
+            "synthesis_trace": synthesis_trace,
         }
         budget_limit = (final_structured.constraints.budget or {}).get("amount")
         if budget_limit:
