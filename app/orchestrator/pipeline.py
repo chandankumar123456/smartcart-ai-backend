@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+import app.data.layer as data_layer
 from app.agents.constraint_extraction import ConstraintExtractionAgent
 from app.agents.constraint_optimizer import ConstraintOptimizerAgent
 from app.agents.deal_detection import DealDetectionAgent
@@ -46,34 +47,36 @@ from app.data.models import (
     FinalStructuredQuery,
     FinalResponse,
     NormalizedItem,
-    QueryFilters,
-    QueryMetadata,
-    QueryIntent,
     LearningSignals,
-    EvaluationResult,
-    EvaluationFrame,
     PlatformEvent,
     PlatformEventType,
+    QueryFilters,
+    QueryIntent,
+    QueryMetadata,
     QueryConstraints,
     RecipeResult,
     StructuredItem,
     StructuredQuery,
+    UnifiedProduct,
 )
 from app.coordination.network import get_coordination_network
 from app.events.platform_events import get_platform_event_intelligence
 from app.memory.shared import get_shared_memory
 from app.learning.feedback import LearningLoop
 from app.llm.manager import LLMManager, get_llm_manager
+from app.orchestrator.search_graph import build_search_execution_graph
+from app.orchestrator.state import SearchGraphState
 from app.response.builder import ResponseBuilder
 
 logger = logging.getLogger(__name__)
-_MAX_REASONING_RETRY_ATTEMPTS = 3
+_MAX_REASONING_RETRY_ATTEMPTS = 2
 _MAX_CANDIDATE_ENTITIES = 3
 _MIN_OPTIMIZATION_SCORE = 0.2
 _GLOBAL_OPTIMIZATION_DELIVERY_WEIGHT = 0.2
 _DEFAULT_DELIVERY_MINUTES = 30.0
 _MAX_DELIVERY_MINUTES = 90.0
 _MATCHING_QUALITY_THRESHOLD = 0.45
+_MIN_HIGH_QUALITY_RESULTS = 2
 
 
 class AgentPipeline:
@@ -111,6 +114,9 @@ class AgentPipeline:
         self._platform_events = get_platform_event_intelligence()
         self._shared_memory = get_shared_memory()
         self._coordination = get_coordination_network()
+        self._matching_quality_threshold = _MATCHING_QUALITY_THRESHOLD
+        self._min_high_quality_results = _MIN_HIGH_QUALITY_RESULTS
+        self._search_graph = build_search_execution_graph(self)
 
     # ------------------------------------------------------------------
     # Public entry points
@@ -233,16 +239,18 @@ class AgentPipeline:
     async def run_search(self, final_structured: FinalStructuredQuery) -> FinalResponse:
         """Execute search only from finalized structured intelligence."""
         logger.debug("[ENTRY] endpoint=/search type=search_execution_structured")
-        state: Dict[str, Any] = {"raw_query": final_structured.clean_query.text}
-        state["final_structured_query"] = final_structured
-        state["structured_query"] = final_structured.structured_query
+        state: SearchGraphState = {
+            "user_query": final_structured.clean_query.text,
+            "final_structured_query": final_structured,
+            "structured_query": final_structured.structured_query,
+        }
 
         if not final_structured.domain_guard.allowed:
-            return self._builder.build_domain_guard_response(state)
+            return self._builder.build_domain_guard_response({"raw_query": final_structured.clean_query.text, **state})
 
         sq: StructuredQuery = state["structured_query"]
         if sq.intent == QueryIntent.unsupported:
-            return self._builder.build_unsupported_response(state)
+            return self._builder.build_unsupported_response({"raw_query": final_structured.clean_query.text, **state})
         if any(n.operation == "recipe_generation" for n in final_structured.execution_graph.nodes):
             response = await self.run_recipe(final_structured.clean_query.text)
             if any(n.operation == "cart_optimization" for n in final_structured.execution_graph.nodes):
@@ -263,142 +271,26 @@ class AgentPipeline:
             merged = dict(final_structured.constraints.ranking_preference_weights)
             merged.update({k: float(v) for k, v in ranking_boost.items()})
             final_structured.constraints.ranking_preference_weights = merged
-        candidate_entities = [c.entity_candidate for c in final_structured.candidate_paths] or [sq.product]
-        if final_structured.normalized_entities.entities:
-            primary = final_structured.normalized_entities.entities[0]
-            candidate_entities = [primary.canonical_name, *candidate_entities]
-        candidate_entities = self._sanitize_candidate_entities(candidate_entities)
-
-        best_response: Optional[FinalResponse] = None
-        best_eval = EvaluationResult(success=False, should_retry=True, quality_score=0.0)
-        best_path = ""
-        retries = 0
-        while retries < _MAX_REASONING_RETRY_ATTEMPTS:
-            path_results: List[tuple[str, FinalResponse, EvaluationResult]] = []
-            for idx, entity in enumerate(candidate_entities):
-                path_id = f"path-{idx}"
-                path_state = dict(state)
-                normalized = await self._normalization_agent.run(entity)
-                path_state["normalized_item"] = normalized
-                path_state["unified_product"] = await self._product_agent.run(sq, normalized)
-                matching = path_state["unified_product"].diagnostics
-                if (
-                    (
-                        not path_state["unified_product"].platforms
-                        or matching.quality_score < _MATCHING_QUALITY_THRESHOLD
-                    )
-                    and normalized.possible_variants
-                ):
-                    extra_candidates = [
-                        candidate for candidate in normalized.possible_variants
-                        if candidate not in candidate_entities
-                    ]
-                    if extra_candidates:
-                        candidate_entities = self._sanitize_candidate_entities(
-                            candidate_entities + extra_candidates
-                        )
-                live_entity = market_signals.get(normalized.canonical_name, {}) if isinstance(market_signals, dict) else {}
-                if live_entity.get("in_stock") is False:
-                    alt_candidates = [c for c in candidate_entities if c != entity]
-                    if alt_candidates:
-                        normalized = await self._normalization_agent.run(alt_candidates[0])
-                        path_state["normalized_item"] = normalized
-                        path_state["unified_product"] = await self._product_agent.run(sq, normalized)
-                if live_entity.get("price") is not None:
-                    live_price = float(live_entity.get("price"))
-                    for p in path_state["unified_product"].platforms:
-                        if p.normalized_name == normalized.canonical_name.lower().strip():
-                            p.price = min(p.price, live_price)
-                path_state["ranking_result"] = await self._ranking_agent.run(
-                    path_state["unified_product"],
-                    ranking_preferences=final_structured.constraints.ranking_preference_weights,
-                )
-                budget_limit = (final_structured.constraints.budget or {}).get("amount")
-                path_state["ranking_result"] = self._apply_budget_optimization(
-                    path_state["ranking_result"],
-                    budget_limit,
-                )
-                path_state["deal_result"] = await self._deal_agent.run(path_state["unified_product"])
-                if "deal_detection" not in final_structured.execution_plan.steps:
-                    path_state["deal_result"].deals = []
-                    path_state["deal_result"].trending_deals = []
-                candidate_response = self._builder.build_search_response(path_state)
-                candidate_eval = await self._evaluation_agent.run(final_structured, candidate_response)
-                final_structured.evaluation_history.append(
-                    EvaluationFrame(
-                        iteration=retries,
-                        path_id=path_id,
-                        quality_score=candidate_eval.quality_score,
-                        failures=candidate_eval.failure_signals,
-                        corrections=candidate_eval.correction_suggestions,
-                    )
-                )
-                path_results.append((path_id, candidate_response, candidate_eval))
-
-            chosen = max(path_results, key=lambda x: x[2].quality_score)
-            best_path, best_response, best_eval = chosen
-            if not best_eval.should_retry:
-                break
-            retries += 1
-            final_structured.learning_signals.retry_count = retries
-            final_structured.learning_signals.evaluation_notes.extend(best_eval.correction_suggestions)
-            if "poor_match_quality" in best_eval.failure_signals:
-                candidate_entities = self._sanitize_candidate_entities(
-                    candidate_entities
-                    + (final_structured.ambiguity.candidate_entities or [])
-                    + [variant for e in final_structured.normalized_entities.entities for variant in e.possible_variants]
-                )
-            if "constraint_violation" in best_eval.failure_signals:
-                final_structured.constraints.ranking_preference_weights = self._constraint_optimizer.derive_weights(
-                    final_structured.constraints.ranking_preference_weights,
-                    ["cheap", *final_structured.constraints.preferences],
-                    final_structured.user_context.preferences,
-                )
-
-        for path in final_structured.candidate_paths:
-            path.selected = path.path_id == best_path
-            if path.selected:
-                path.quality_score = best_eval.quality_score
-                path.status = "selected"
-            else:
-                path.status = "evaluated"
-        final_structured.learning_signals.evaluation_notes.append(f"selected_path:{best_path}")
-        await self._query_logger.run("evaluation", best_eval.model_dump())
-        if not best_eval.success:
-            for policy_item in final_structured.failure_policies:
-                if policy_item.failure_type in (best_eval.failure_signals or []):
-                    policy_item.applied = True
-        state["final_structured_query"] = final_structured
-        response = best_response or self._builder.build_search_response(state)
-        if final_structured.user_context.predicted_needs:
-            response.metadata["predicted_needs"] = final_structured.user_context.predicted_needs
-        response.metadata["coordination_trace"] = self._coordination.trace()
-        response.metadata["platform_signals"] = final_structured.platform_signals
-        budget_limit = (final_structured.constraints.budget or {}).get("amount")
-        if budget_limit:
-            response.results = [r for r in response.results if float(r.get("price", 0)) <= float(budget_limit)]
-            if response.best_option and float(response.best_option.get("price", 0)) > float(budget_limit):
-                response.best_option = {}
-            if not response.best_option and response.results:
-                response.best_option = response.results[0]
-            response.total_price = response.best_option.get("price", 0.0) if response.best_option else 0.0
-            if not response.results:
-                response.metadata["no_results_message"] = "No products found within budget"
-        if best_eval.success:
-            await self._learning_loop.learn_from_success(final_structured)
-        else:
-            await self._learning_loop.learn_from_outcome(final_structured, success=False)
-        await self._platform_events.ingest(
-            event=PlatformEvent(
-                event_type=PlatformEventType.user_behavior,
-                user_id=final_structured.user_context.user_id or "anonymous",
-                payload={
-                    "action": "search_execute",
-                    "query": final_structured.clean_query.normalized_text,
-                    "best_option": response.best_option.get("name") if isinstance(response.best_option, dict) else None,
-                    "selected_path": best_path,
-                },
-            )
+        state.update(
+            {
+                "candidate_entities": self._build_candidate_entities(final_structured),
+                "current_path_index": 0,
+                "retry_count": 0,
+                "path_history": [],
+                "tool_trace": [],
+                "market_signals": market_signals if isinstance(market_signals, dict) else {},
+                "ranking_preferences": dict(final_structured.constraints.ranking_preference_weights),
+                "budget_limit": (final_structured.constraints.budget or {}).get("amount"),
+                "max_retries": _MAX_REASONING_RETRY_ATTEMPTS,
+            }
+        )
+        result_state = await self._search_graph.ainvoke(state)
+        response = result_state.get("response") or self._builder.build_search_response(
+            {
+                "raw_query": final_structured.clean_query.text,
+                "structured_query": final_structured.structured_query,
+                "final_structured_query": final_structured,
+            }
         )
         logger.debug(
             "[FINAL_OUTPUT] result_count=%s total_price=%s deals=%s",
@@ -489,6 +381,90 @@ class AgentPipeline:
     @staticmethod
     def _sanitize_candidate_entities(entities: List[str]) -> List[str]:
         return list(dict.fromkeys([e for e in entities if isinstance(e, str) and e.strip()]))[:_MAX_CANDIDATE_ENTITIES]
+
+    def _build_candidate_entities(self, final_structured: FinalStructuredQuery) -> List[str]:
+        candidate_entities = [c.entity_candidate for c in final_structured.candidate_paths] or [
+            final_structured.structured_query.product
+        ]
+        if final_structured.normalized_entities.entities:
+            candidate_entities = [
+                final_structured.normalized_entities.entities[0].canonical_name,
+                *candidate_entities,
+            ]
+        return self._sanitize_candidate_entities(candidate_entities)
+
+    @staticmethod
+    def _category_candidates(category: str) -> List[str]:
+        return list(data_layer._CATEGORY_TO_ENTITIES.get(category or "", []))
+
+    @staticmethod
+    def _apply_market_signal_adjustments(
+        unified_product: UnifiedProduct,
+        normalized_item: NormalizedItem,
+        market_signals: Dict[str, Any],
+    ) -> UnifiedProduct:
+        live_entity = market_signals.get(normalized_item.canonical_name, {}) if isinstance(market_signals, dict) else {}
+        if not live_entity:
+            return unified_product
+        adjusted = unified_product.model_copy(deep=True)
+        for product in adjusted.platforms:
+            if product.normalized_name == normalized_item.canonical_name.lower().strip():
+                if live_entity.get("in_stock") is False:
+                    product.in_stock = False
+                if live_entity.get("price") is not None:
+                    product.price = min(product.price, float(live_entity["price"]))
+        return adjusted
+
+    def _decorate_search_response(
+        self,
+        response: FinalResponse,
+        final_structured: FinalStructuredQuery,
+        retry_count: int,
+        selected_path: str,
+        match_quality: str,
+        tool_trace: List[Dict[str, Any]],
+        path_history: List[Dict[str, Any]],
+    ) -> None:
+        if final_structured.user_context.predicted_needs:
+            response.metadata["predicted_needs"] = final_structured.user_context.predicted_needs
+        response.metadata["coordination_trace"] = self._coordination.trace()
+        response.metadata["platform_signals"] = final_structured.platform_signals
+        response.metadata["search_graph"] = {
+            "match_quality": match_quality,
+            "retry_count": retry_count,
+            "selected_path": selected_path,
+            "tool_trace": tool_trace,
+            "path_history": path_history,
+        }
+        budget_limit = (final_structured.constraints.budget or {}).get("amount")
+        if budget_limit:
+            response.results = [r for r in response.results if float(r.get("price", 0)) <= float(budget_limit)]
+            if response.best_option and float(response.best_option.get("price", 0)) > float(budget_limit):
+                response.best_option = {}
+            if not response.best_option and response.results:
+                response.best_option = response.results[0]
+            response.total_price = response.best_option.get("price", 0.0) if response.best_option else 0.0
+            if not response.results:
+                response.metadata["no_results_message"] = "No products found within budget"
+
+    async def _emit_search_event(
+        self,
+        final_structured: FinalStructuredQuery,
+        response: FinalResponse,
+        selected_path: str,
+    ) -> None:
+        await self._platform_events.ingest(
+            event=PlatformEvent(
+                event_type=PlatformEventType.user_behavior,
+                user_id=final_structured.user_context.user_id or "anonymous",
+                payload={
+                    "action": "search_execute",
+                    "query": final_structured.clean_query.normalized_text,
+                    "best_option": response.best_option.get("name") if isinstance(response.best_option, dict) else None,
+                    "selected_path": selected_path,
+                },
+            )
+        )
 
     def _apply_budget_optimization(self, ranking_result: Any, budget_limit: Any) -> Any:
         if not budget_limit:

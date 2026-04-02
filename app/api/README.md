@@ -180,6 +180,8 @@ sequenceDiagram
       A-->>C: FinalResponse
     else cache miss
       A->>P: run_search(FinalStructuredQuery)
+      P->>P: seed SearchGraphState
+      P->>P: langgraph.ainvoke(...)
       P-->>A: FinalResponse
       A->>R: set(search, cache_key, response)
       A-->>C: FinalResponse
@@ -191,6 +193,8 @@ sequenceDiagram
 ## 5) Response structure and field behavior
 
 Search responses are assembled by `ResponseBuilder.build_search_response`.
+
+`POST /search` now executes a compiled LangGraph search runtime behind `AgentPipeline.run_search` while preserving the same route contract and cache behavior.
 
 Each product row includes:
 - identity/context: `platform`, `product_id`, `name`, `brand`, `unit`
@@ -204,6 +208,11 @@ Each product row includes:
 - `link unavailable` otherwise
 
 `best_option` mirrors key fields from top-ranked item.
+
+Search response metadata includes:
+- `matching` -> `matched_via`, `fallback_trace`, `tool_attempts`, `approximate_match`, `quality_score`, `source_breakdown`
+- `search_graph` -> `match_quality`, `retry_count`, `selected_path`, `tool_trace`, `path_history`
+- `platform_signals` and `coordination_trace` -> orchestration overlays preserved from parse/execution
 
 ---
 

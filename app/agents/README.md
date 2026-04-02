@@ -28,14 +28,16 @@ flowchart TD
     CO --> OF[OutputFormatterAgent]
     OF --> FSQ[FinalStructuredQuery]
 
-    FSQ --> EX[run_search loop]
-    EX --> NM1[NormalizationAgent.run per candidate]
-    NM1 --> PM[ProductMatchingAgent]
-    PM --> RK[RankingAgent]
-    RK --> DD[DealDetectionAgent]
-    DD --> RB[ResponseBuilder]
+    FSQ --> SG[Compiled LangGraph Search Runtime]
+    SG --> NM1[normalization_node]
+    NM1 --> PM[product_matching_node]
+    PM --> MQ[match_quality_node]
+    MQ -->|strong| RK[ranking_node]
+    MQ -->|weak / empty| EN[enrichment_node]
+    EN --> PM
+    RK --> DD[deal_detection_node]
+    DD --> RB[response_node]
     RB --> EV[EvaluationAgent]
-    EV --> EX
 ```
 
 Cross-cutting collaborators used by pipeline:
@@ -71,31 +73,35 @@ Additional parse-time operations:
 
 ---
 
-## 3) Execution phase: search, evaluation, and retry
+## 3) Execution phase: search graph, evaluation, and retry
 
 `run_search(final_structured: FinalStructuredQuery)`:
 1. Applies domain guard and unsupported intent exits.
 2. If execution graph includes `recipe_generation`, delegates to recipe pipeline.
 3. Loads policy/market signals and merges ranking preferences.
-4. Builds and sanitizes candidate entity list.
-5. Iterates over candidates per retry cycle:
-   - normalize candidate (`NormalizationAgent.run`)
-   - match products (`ProductMatchingAgent.run`)
-   - apply live market signal stock/price adjustments
-   - rank (`RankingAgent.run`)
-   - apply budget optimization filter
-   - detect deals (`DealDetectionAgent.run`)
-   - build candidate response (`ResponseBuilder.build_search_response`)
-   - evaluate (`EvaluationAgent.run`)
-6. Selects best path by max `quality_score`.
-7. Retries while `should_retry` and retries < `_MAX_REASONING_RETRY_ATTEMPTS` (`3`).
-8. Updates candidate path selection status + quality.
-9. Applies budget hard filter on final response rows.
-10. Emits learning outcomes and user behavior platform event.
-
-Retry-trigger signal handling includes:
-- `poor_match_quality` -> expand candidates
-- `constraint_violation` -> rebalance ranking weights toward cheap preferences
+4. Seeds `SearchGraphState` with:
+   - `user_query`
+   - `structured_query`
+   - `final_structured_query`
+   - `candidate_entities`
+   - `ranking_preferences`
+   - `market_signals`
+   - `retry_count`
+   - `tool_trace`
+5. Invokes the compiled LangGraph runtime:
+   - `normalization_node` -> `NormalizationAgent.run`
+   - `product_matching_node` -> `ProductMatchingAgent.run`
+   - `match_quality_node` -> classifies `strong | weak | empty`
+   - `enrichment_node` -> expands variants, ambiguity candidates, and category substitutes
+   - `ranking_node` -> `RankingAgent.run` + budget optimization
+   - `deal_detection_node` -> `DealDetectionAgent.run`
+   - `response_node` -> `ResponseBuilder.build_search_response` + evaluation/telemetry
+6. Uses conditional edges instead of imperative retry loops:
+   - `strong -> ranking_node`
+   - `weak / empty -> enrichment_node` while retries remain
+   - exhausted retries route to `ranking_node` if products exist, otherwise `response_node`
+7. Caps retries at `_MAX_REASONING_RETRY_ATTEMPTS` (`2`) and records the value in both graph state and `learning_signals.retry_count`.
+8. Updates candidate path selection metadata, response observability, learning outcomes, and user behavior platform event.
 
 ---
 
@@ -138,7 +144,7 @@ Retry-trigger signal handling includes:
 - Derives preferences/dietary/budget/consumption behavior and predicted needs.
 
 ## ExecutionPlannerAgent (`execution_planner.py`)
-- Constructs operation plan and execution graph.
+- Constructs operation plan and execution graph metadata that mirrors the LangGraph runtime node names and retry edges.
 - Adds recipe/cart nodes based on primary and secondary intents.
 - Generates candidate execution paths with confidence ordering.
 
@@ -147,7 +153,8 @@ Retry-trigger signal handling includes:
 - Provides candidate scoring used in budget optimization.
 
 ## ProductMatchingAgent (`product_matching.py`)
-- Calls data layer `match_products_for_entity`.
+- Executes DB-first product matching plus async tool registry fan-out.
+- Normalizes tool outputs into `PlatformProduct`, aggregates them into `UnifiedProduct`, and records `MatchingDiagnostics`.
 - Applies filters (`max_price`, `min_price`, `brand`) and top-k relaxation when strict filters empty the set.
 
 ## RankingAgent (`ranking.py`)
@@ -159,7 +166,7 @@ Retry-trigger signal handling includes:
 
 ## EvaluationAgent (`evaluation.py`)
 - Scores response quality and emits failure signals/corrections.
-- Controls retry via `should_retry`.
+- Remains responsible for observability and learning feedback after graph execution rather than controlling the search loop directly.
 
 ## OutputFormatterAgent (`output_formatter.py`)
 - Deterministically assembles all stage outputs into `FinalStructuredQuery`.
@@ -178,14 +185,14 @@ Retry-trigger signal handling includes:
 
 ## 5) Execution-path branching and selection
 
-`FinalStructuredQuery.candidate_paths` and runtime candidate entities drive multi-path reasoning.
+`FinalStructuredQuery.candidate_paths` and runtime candidate entities drive graph-based path reasoning.
 
 Path lifecycle:
 1. Initialize candidate list from planner + primary normalized entity.
-2. Evaluate each candidate path in current retry iteration.
-3. Record `EvaluationFrame` in `evaluation_history`.
-4. Choose best-quality path.
-5. Mark selected path (`selected=True`, `status="selected"`) and non-selected as `evaluated`.
+2. Normalize and match the active path selected by graph state.
+3. Route through `match_quality_node` and optional `enrichment_node`.
+4. Record `EvaluationFrame` in `evaluation_history` for the selected path.
+5. Mark selected path (`selected=True`, `status="selected"`) and processed non-selected paths as `evaluated`.
 
 This enables controlled ambiguity handling without reparsing the raw query.
 
@@ -228,6 +235,6 @@ These tests cover:
 - parse-query contract completeness
 - ranking/deal behavior
 - ambiguity handling
-- retry loop behavior
+- LangGraph retry routing behavior
 - normalization synonym mapping
 - recipe/cart pipeline outputs

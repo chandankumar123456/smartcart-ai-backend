@@ -3,7 +3,15 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from app.data.models import CartItem
+from app.data.models import (
+    CartItem,
+    MatchingDiagnostics,
+    NormalizedItem,
+    QueryFilters,
+    QueryIntent,
+    StructuredQuery,
+    UnifiedProduct,
+)
 from app.orchestrator.pipeline import AgentPipeline
 
 
@@ -166,6 +174,19 @@ class TestSearchPipeline:
         assert any(node.operation == "recipe_generation" for node in parsed.execution_graph.nodes)
 
     @pytest.mark.asyncio
+    async def test_parse_query_search_execution_graph_uses_langgraph_nodes(self, pipeline):
+        parsed = await pipeline.parse_query("milk")
+        operations = [node.operation for node in parsed.execution_graph.nodes]
+        assert operations[:4] == [
+            "normalization_node",
+            "product_matching_node",
+            "match_quality_node",
+            "enrichment_node",
+        ]
+        assert "ranking_node" in operations
+        assert "response_node" in operations
+
+    @pytest.mark.asyncio
     async def test_parse_query_ambiguity_has_candidates(self, pipeline):
         parsed = await pipeline.parse_query("need paneer and salad")
         assert parsed.ambiguity.needs_resolution is True
@@ -205,6 +226,48 @@ class TestSearchPipeline:
         parsed2 = await pipeline.parse_query("cheap milk under 20")
         await pipeline.run_search(parsed2)
         assert any(note.startswith("selected_path:") for note in parsed2.learning_signals.evaluation_notes)
+
+    @pytest.mark.asyncio
+    async def test_search_response_includes_graph_metadata(self, pipeline):
+        result = await self._run_from_query(pipeline, "milk")
+        graph_meta = result.metadata.get("search_graph", {})
+        assert graph_meta.get("selected_path", "").startswith("path-")
+        assert graph_meta.get("match_quality") in {"strong", "weak", "empty"}
+        assert isinstance(graph_meta.get("retry_count"), int)
+        assert isinstance(graph_meta.get("tool_trace"), list)
+
+    @pytest.mark.asyncio
+    async def test_search_graph_retry_count_caps_at_two(self, pipeline):
+        parsed = await pipeline.parse_query("milk")
+        parsed.structured_query = StructuredQuery(
+            product="milk",
+            filters=QueryFilters(),
+            intent=QueryIntent.product_search,
+            normalized_query="milk",
+            raw_query="milk",
+        )
+        pipeline._normalization_agent.run = AsyncMock(
+            return_value=NormalizedItem(
+                canonical_name="milk",
+                possible_variants=["skim milk", "whole milk"],
+                category="dairy",
+            )
+        )
+        pipeline._product_agent.run = AsyncMock(
+            return_value=UnifiedProduct(
+                entity="milk",
+                normalized_name="milk",
+                platforms=[],
+                diagnostics=MatchingDiagnostics(
+                    input_term="milk",
+                    fallback_trace=["db_lookup"],
+                    quality_score=0.0,
+                ),
+            )
+        )
+        result = await pipeline.run_search(parsed)
+        assert result.results == []
+        assert parsed.learning_signals.retry_count == 2
 
     @pytest.mark.asyncio
     async def test_parse_query_includes_platform_signals_and_coordination_trace(self, pipeline):

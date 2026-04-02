@@ -23,12 +23,16 @@ flowchart LR
     API --> Cache{Redis Cache}
     Cache -->|hit| Resp[FinalResponse]
     Cache -->|miss| Exec[AgentPipeline.run_search]
-    Exec --> Match[ProductMatchingAgent + Data Layer]
-    Match --> Rank[RankingAgent]
-    Rank --> Deals[DealDetectionAgent]
-    Deals --> Build[ResponseBuilder]
-    Build --> Eval[EvaluationAgent + Retry Loop]
-    Eval --> Resp
+    Exec --> Graph[Compiled LangGraph Search Graph]
+    Graph --> Norm[normalization_node]
+    Norm --> Match[product_matching_node]
+    Match --> Quality[match_quality_node]
+    Quality -->|strong| Rank[ranking_node]
+    Quality -->|weak / empty| Enrich[enrichment_node]
+    Enrich --> Match
+    Rank --> Deals[deal_detection_node]
+    Deals --> Build[response_node]
+    Build --> Resp
 
     Scheduler[ScraperScheduler] --> Queue[JobQueue]
     Queue --> Worker[handle_scrape_prices]
@@ -80,15 +84,22 @@ Additional operations in this phase:
 
 ### Search phase (`AgentPipeline.run_search`)
 High-level behavior:
-1. Enforce `domain_guard` and unsupported intent gates.
-2. Branch to recipe flow if execution graph includes `recipe_generation`.
-3. Build candidate entities from `candidate_paths` + primary normalized entity.
-4. For each candidate path: normalize -> match -> rank -> deals -> response -> evaluate.
-5. Select best path by max evaluation quality score.
-6. Retry loop bounded by `_MAX_REASONING_RETRY_ATTEMPTS = 3`.
-7. Apply budget post-filtering and no-result budget message.
-8. Attach coordination trace and platform signals in response metadata.
-9. Emit user behavior platform event.
+1. Enforce `domain_guard`, unsupported intent, and recipe delegation gates for compatibility.
+2. Seed `SearchGraphState` from `FinalStructuredQuery`, policy overlays, market signals, and retry limits.
+3. Invoke the compiled LangGraph runtime with explicit nodes:
+   - `normalization_node`
+   - `product_matching_node`
+   - `match_quality_node`
+   - `enrichment_node`
+   - `ranking_node`
+   - `deal_detection_node`
+   - `response_node`
+4. Route graph transitions with conditional edges:
+   - `strong -> ranking_node`
+   - `weak / empty -> enrichment_node`
+   - `enrichment_node -> product_matching_node`
+5. Cap retries with `retry_count` and `_MAX_REASONING_RETRY_ATTEMPTS = 2`.
+6. Preserve budget filtering, coordination metadata, learning updates, and event emission after graph completion.
 
 ### Recipe phase (`AgentPipeline.run_recipe`)
 - Delegates to `RecipeAgent.run(query, servings)`.
@@ -117,7 +128,7 @@ High-level behavior:
 - Ranking/constraints/deal logic are deterministic and testable.
 
 ## Reliability controls
-- Evaluation-driven retry loop (quality/failure signals).
+- LangGraph-controlled retry loop with bounded enrichment retries and explicit conditional routing.
 - Optional Redis cache with graceful no-op behavior if unavailable.
 - API fallback with bounded retries and exponential backoff for 429/transport failures.
 - Startup continues in degraded mode if DB init fails.
@@ -134,13 +145,16 @@ High-level behavior:
 flowchart TD
     E[Entity + variants] --> DBQ[_search_db_products]
     DBQ -->|rows found| DBR[PlatformProduct source=db]
-    DBQ -->|miss| APIFB[_fetch_api_fallback]
-    APIFB -->|rows found| UPSERT[save_products_to_db]
-    APIFB --> APIR[PlatformProduct source=api]
-    APIFB -->|miss + MOCK_DATA_ENABLED=true| MOCK[_MOCK_PRODUCTS]
-    DBR --> OUT[match_products_for_entity result]
-    APIR --> OUT
-    MOCK --> OUT
+    DBQ -->|miss / weak| TOOLS[ProductIntelligenceRegistry.fetch]
+    TOOLS --> API[External API]
+    TOOLS --> HTTP[HTTP fetch]
+    TOOLS --> SCRAPE[Scraper fallback]
+    TOOLS --> SEARCH[Search fallback]
+    TOOLS --> APIR[PlatformProduct source=tool]
+    APIR --> UNIFY[UnifiedProduct + MatchingDiagnostics]
+    DBR --> UNIFY
+    SEARCH -->|approximation| MOCK[_MOCK_PRODUCTS / category substitutes]
+    MOCK --> UNIFY
 ```
 
 ### Scraper ingestion path
@@ -205,6 +219,10 @@ Uniform response shape:
 Search result rows include runtime provenance and URL state:
 - `source` (`db`, `api`, `mock` depending on path)
 - `link_status` (`available` or `link unavailable`)
+
+Search metadata also exposes graph/runtime observability:
+- `matching` -> matching diagnostics (`matched_via`, `fallback_trace`, `tool_attempts`, `approximate_match`, `quality_score`)
+- `search_graph` -> graph routing metadata (`match_quality`, `retry_count`, `selected_path`, `tool_trace`, `path_history`)
 
 ---
 

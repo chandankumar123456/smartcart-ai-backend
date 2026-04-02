@@ -32,34 +32,62 @@ class ExecutionPlannerAgent:
         secondary = set(intent_result.secondary_intents)
         plan_id = f"plan-{uuid.uuid4().hex[:8]}"
         nodes: list[ExecutionNode] = [
-            ExecutionNode(node_id="match", operation="product_matching"),
+            ExecutionNode(node_id="normalize", operation="normalization_node"),
+            ExecutionNode(
+                node_id="match",
+                operation="product_matching_node",
+                depends_on=["normalize"],
+            ),
+            ExecutionNode(
+                node_id="quality",
+                operation="match_quality_node",
+                depends_on=["match"],
+            ),
             ExecutionNode(
                 node_id="enrich",
-                operation="tool_enrichment",
-                depends_on=["match"],
-                condition="if_match_empty_or_low_quality",
+                operation="enrichment_node",
+                depends_on=["quality"],
+                condition="if_match_empty_or_weak",
+                metadata={"max_retries": 2},
             ),
-            ExecutionNode(node_id="rank", operation="ranking", depends_on=["match"]),
-            ExecutionNode(node_id="deals", operation="deal_detection", depends_on=["rank"]),
+            ExecutionNode(node_id="rank", operation="ranking_node", depends_on=["quality"]),
+            ExecutionNode(node_id="deals", operation="deal_detection_node", depends_on=["rank"]),
+            ExecutionNode(node_id="response", operation="response_node", depends_on=["deals"]),
         ]
         edges = [
-            {"from": "match", "to": "rank"},
-            {"from": "match", "to": "enrich"},
-            {"from": "enrich", "to": "rank"},
+            {"from": "normalize", "to": "match"},
+            {"from": "match", "to": "quality"},
+            {"from": "quality", "to": "rank", "condition": "strong"},
+            {"from": "quality", "to": "enrich", "condition": "weak_or_empty"},
+            {"from": "enrich", "to": "match", "condition": "retry"},
+            {"from": "enrich", "to": "rank", "condition": "retry_exhausted_with_candidates"},
+            {"from": "enrich", "to": "response", "condition": "retry_exhausted_empty"},
             {"from": "rank", "to": "deals"},
+            {"from": "deals", "to": "response"},
         ]
         adaptive_flags = {
             "skip_deals": "cheap" in constraints.preferences,
-            "skip_ranking": primary == QueryIntent.exploratory and intent_result.confidence < 0.6,
+            "skip_ranking": False,
             "personalized_weights": bool(user_context.preferences or user_context.dietary_patterns),
             "tool_enrichment": True,
         }
         if adaptive_flags["skip_deals"]:
-            nodes = [n for n in nodes if n.node_id != "deals"]
-            edges = [e for e in edges if e["to"] != "deals"]
-        if adaptive_flags["skip_ranking"]:
-            nodes = [n for n in nodes if n.node_id != "rank"]
-            edges = [e for e in edges if e["to"] != "rank" and e["from"] != "rank"]
+            nodes = [
+                ExecutionNode(node_id="response", operation="response_node", depends_on=["rank"])
+                if n.node_id == "response"
+                else n
+                for n in nodes
+                if n.node_id != "deals"
+            ]
+            edges = [
+                {"from": "normalize", "to": "match"},
+                {"from": "match", "to": "quality"},
+                {"from": "quality", "to": "rank", "condition": "strong"},
+                {"from": "quality", "to": "enrich", "condition": "weak_or_empty"},
+                {"from": "enrich", "to": "match", "condition": "retry"},
+                {"from": "enrich", "to": "rank", "condition": "retry_exhausted_with_candidates"},
+                {"from": "rank", "to": "response"},
+            ]
 
         candidate_paths = []
         for idx, candidate in enumerate(candidate_entities[:3]):
