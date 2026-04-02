@@ -98,7 +98,7 @@ High-level behavior:
    - `strong -> ranking_node`
    - `weak / empty -> enrichment_node`
    - `enrichment_node -> product_matching_node`
-5. Cap retries with `retry_count` and `_MAX_REASONING_RETRY_ATTEMPTS = 2`.
+5. Cap retries with `retry_count` and `_MAX_ENRICHMENT_RETRY_ATTEMPTS = 2`.
 6. Preserve budget filtering, coordination metadata, learning updates, and event emission after graph completion.
 
 ### Recipe phase (`AgentPipeline.run_recipe`)

@@ -278,10 +278,15 @@ class TestProductMatchingAgent:
             price=30.0,
             source="db",
         )
-        with patch.object(data_layer, "_search_db_products", return_value=[sample]):
+        with patch.object(data_layer, "_search_db_products", return_value=[sample]), patch.object(
+            agent._tool_registry,
+            "fetch",
+            AsyncMock(return_value=([], [])),
+        ) as mock_fetch:
             result = await agent.run(sq)
         assert len(result.platforms) == 1
         assert result.platforms[0].source == "db"
+        mock_fetch.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_tool_fallback_maps_inconsistent_payload(self):

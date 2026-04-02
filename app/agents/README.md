@@ -100,7 +100,7 @@ Additional parse-time operations:
    - `strong -> ranking_node`
    - `weak / empty -> enrichment_node` while retries remain
    - exhausted retries route to `ranking_node` if products exist, otherwise `response_node`
-7. Caps retries at `_MAX_REASONING_RETRY_ATTEMPTS` (`2`) and records the value in both graph state and `learning_signals.retry_count`.
+7. Caps retries at `_MAX_ENRICHMENT_RETRY_ATTEMPTS` (`2`) and records the value in both graph state and `learning_signals.retry_count`.
 8. Updates candidate path selection metadata, response observability, learning outcomes, and user behavior platform event.
 
 ---
