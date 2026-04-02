@@ -17,7 +17,7 @@ class ResponseBuilder:
     """Assembles FinalResponse from pipeline state."""
 
     def build_unsupported_response(self, state: Dict[str, Any]) -> FinalResponse:
-        raw_query = state.get("raw_query", "")
+        raw_query = state.get("raw_query", state.get("user_query", ""))
         sq = state.get("structured_query")
         return FinalResponse(
             query=raw_query,
@@ -38,7 +38,7 @@ class ResponseBuilder:
         )
 
     def build_domain_guard_response(self, state: Dict[str, Any]) -> FinalResponse:
-        raw_query = state.get("raw_query", "")
+        raw_query = state.get("raw_query", state.get("user_query", ""))
         final_structured = state.get("final_structured_query")
         domain_guard = final_structured.domain_guard if final_structured else None
         return FinalResponse(
@@ -66,10 +66,11 @@ class ResponseBuilder:
         )
 
     def build_search_response(self, state: Dict[str, Any]) -> FinalResponse:
-        raw_query = state.get("raw_query", "")
-        ranking = state.get("ranking_result")
-        deal_result = state.get("deal_result")
+        raw_query = state.get("raw_query", state.get("user_query", ""))
+        ranking = state.get("ranking_result") or state.get("ranked_products")
+        deal_result = state.get("deal_result") or state.get("deals")
         final_structured = state.get("final_structured_query")
+        unified_product = state.get("unified_product")
 
         results = []
         if ranking:
@@ -154,6 +155,9 @@ class ResponseBuilder:
                 ),
                 "structured_intelligence": (
                     final_structured.model_dump() if final_structured else {}
+                ),
+                "matching": (
+                    unified_product.diagnostics.model_dump() if unified_product else {}
                 ),
             },
         )

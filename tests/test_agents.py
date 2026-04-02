@@ -5,15 +5,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import app.data.layer as data_layer
 from app.agents.deal_detection import DealDetectionAgent
 from app.agents.ambiguity_reasoning import AmbiguityReasoningAgent
 from app.agents.evaluation import EvaluationAgent
 from app.agents.normalization import NormalizationAgent
 from app.agents.product_matching import ProductMatchingAgent
+from app.agents.tools.product_intelligence import ProductIntelligenceContext, ProductIntelligenceRegistry, map_external_product
 from app.agents.query_understanding import QueryUnderstandingAgent, _rule_based_parse
 from app.agents.ranking import RankingAgent
 from app.agents.recipe import RecipeAgent
-from app.data import layer as data_layer
 from app.data.models import (
     AmbiguityDecision,
     CleanQuery,
@@ -40,6 +41,7 @@ from app.data.models import (
     UserContext,
     ExecutionPlan,
     ExecutionGraph,
+    ToolAttempt,
     StructuredItem,
 )
 
@@ -232,7 +234,10 @@ class TestProductMatchingAgent:
         agent = ProductMatchingAgent()
         sq = StructuredQuery(product="xyz_nonexistent", filters=QueryFilters(), intent=QueryIntent.product_search, raw_query="xyz")
         result = await agent.run(sq)
-        assert result.platforms == []
+        assert len(result.platforms) > 0
+        assert all(product.source == "approximation" for product in result.platforms)
+        assert result.diagnostics.approximate_match is True
+        assert result.diagnostics.quality_score >= 0.0
 
     @pytest.mark.asyncio
     async def test_match_generic_chicken_term(self):
@@ -274,11 +279,87 @@ class TestProductMatchingAgent:
             source="db",
         )
         with patch.object(data_layer, "_search_db_products", return_value=[sample]), patch.object(
-            data_layer, "_fetch_api_fallback", return_value=[]
-        ):
+            agent._tool_registry,
+            "fetch",
+            AsyncMock(return_value=([], [])),  # (products, attempts)
+        ) as mock_fetch:
             result = await agent.run(sq)
         assert len(result.platforms) == 1
         assert result.platforms[0].source == "db"
+        mock_fetch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_tool_fallback_maps_inconsistent_payload(self):
+        agent = ProductMatchingAgent()
+        sq = StructuredQuery(product="oats", filters=QueryFilters(), intent=QueryIntent.product_search, raw_query="oats")
+        tool_products = [
+            {
+                "title": "Rolled Oats 500g",
+                "current_price": "₹99",
+                "stars": "4.4",
+                "id": "ext-1",
+                "platform": "blinkit",
+                "url": "https://blinkit.example/item/1",
+            }
+        ]
+        with patch.object(data_layer, "_search_db_products", return_value=[]), patch.object(
+            agent._tool_registry,
+            "fetch",
+            AsyncMock(return_value=([map_external_product(tool_products[0], entity="oats", default_source="api")], [ToolAttempt(tool_name="api", success=True, result_count=1)])),
+        ):
+            result = await agent.run(sq)
+        assert len(result.platforms) == 1
+        assert result.platforms[0].price == 99.0
+        assert result.platforms[0].rating == 4.4
+        assert result.diagnostics.matched_via == "api"
+
+    @pytest.mark.asyncio
+    async def test_tool_failure_falls_back_to_approximation(self):
+        agent = ProductMatchingAgent()
+        sq = StructuredQuery(product="mystery thing", filters=QueryFilters(), intent=QueryIntent.product_search, raw_query="mystery thing")
+        with patch.object(data_layer, "_search_db_products", return_value=[]), patch.object(
+            agent._tool_registry,
+            "fetch",
+            AsyncMock(return_value=([], [ToolAttempt(tool_name="api", success=False, error="boom")])),
+        ), patch.object(
+            agent._tool_registry,
+            "approximate",
+            AsyncMock(
+                return_value=[
+                    PlatformProduct(
+                        platform=Platform.blinkit,
+                        product_id="approx-1",
+                        name="Approx Grocery Result",
+                        normalized_name="bread",
+                        price=42.0,
+                        source="approximation",
+                    )
+                ]
+            ),
+        ):
+            result = await agent.run(sq)
+        assert len(result.platforms) == 1
+        assert result.platforms[0].source == "approximation"
+        assert result.diagnostics.approximate_match is True
+
+
+class TestProductIntelligenceMapping:
+    def test_map_external_product_handles_sparse_payload(self):
+        product = map_external_product(
+            {
+                "title": "Organic Rice 1kg",
+                "selling_price": "₹120",
+                "review_score": "4.7",
+                "link": "https://example.com/rice",
+            },
+            entity="rice",
+            default_source="http_fetch",
+        )
+        assert product is not None
+        assert product.price == 120.0
+        assert product.rating == 4.7
+        assert product.platform == Platform.external
+        assert product.product_id.startswith("external-")
 
 
 # ---------------------------------------------------------------------------
@@ -502,5 +583,5 @@ class TestEvaluationAgent:
         )
         response = FinalResponse(query="garlic", results=[], best_option={}, deals=[], total_price=0.0, metadata={})
         result = await agent.run(parsed, response)
-        assert result.should_retry is False
-        assert result.success is True
+        assert result.should_retry is True
+        assert result.success is False

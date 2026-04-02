@@ -150,7 +150,7 @@ class TestSearchEndpoint:
         assert "price" in row
         assert "source" in row
         assert row.get("link_status") in {"available", "link unavailable"}
-        assert row.get("source") in {"db", "api", "mock"}
+        assert row.get("source") in {"db", "api", "mock", "search", "approximation", "http_fetch", "scraper"}
 
     def test_search_evening_snacks_has_results(self, client):
         payload = self._parse_payload(client, "something for evening snacks")

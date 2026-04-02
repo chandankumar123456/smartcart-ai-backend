@@ -5,8 +5,9 @@ using an LLM-first strategy, with deterministic fallback when unavailable.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
+from app.agents.base_execution import BaseExecutionAgent
 from app.agents.synonym_memory import SynonymMemoryAgent
 from app.data.models import NormalizedEntities, NormalizedEntity, NormalizedItem, RawEntities
 from app.llm.manager import LLMManager
@@ -150,7 +151,7 @@ def _fallback_normalization(term: str) -> Dict[str, Any]:
     }
 
 
-class NormalizationAgent:
+class NormalizationAgent(BaseExecutionAgent):
     """LLM-first normalizer for open-ended grocery terms."""
 
     def __init__(self, llm_manager: LLMManager, synonym_memory: SynonymMemoryAgent | None = None) -> None:
@@ -228,3 +229,31 @@ class NormalizationAgent:
             if confidence < _UNRESOLVED_CONFIDENCE_THRESHOLD:
                 unresolved.append(entity_text)
         return NormalizedEntities(entities=normalized, unresolved_entities=unresolved)
+
+    async def act(self, state: Mapping[str, Any]) -> Dict[str, Any]:
+        structured_query = state["structured_query"]
+        candidates = list(state.get("candidate_entities") or [structured_query.product])
+        current_index = min(int(state.get("current_path_index", 0)), max(len(candidates) - 1, 0))
+        current_entity = candidates[current_index] if candidates else structured_query.product
+        normalized_item = await self.run(current_entity)
+        return {
+            "current_step": "normalization_node",
+            "candidate_entities": candidates,
+            "current_path_index": current_index,
+            "current_entity": current_entity,
+            "selected_path": f"path-{current_index}",
+            "normalized_item": normalized_item,
+            "unified_product": None,
+            "ranking_result": None,
+            "ranked_products": None,
+            "deal_result": None,
+            "deals": None,
+            "match_quality": "",
+            "tool_request": None,
+            "tool_result": None,
+            "preliminary_products": [],
+            "last_observation": {
+                "normalized_entity": normalized_item.canonical_name,
+                "candidate_index": current_index,
+            },
+        }

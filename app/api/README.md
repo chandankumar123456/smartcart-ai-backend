@@ -21,7 +21,9 @@ flowchart LR
     Auth --> Rate[check_rate_limit]
     Rate --> Validation[Pydantic request validation]
     Validation --> Pipeline[AgentPipeline entrypoint]
-    Pipeline --> Builder[ResponseBuilder]
+    Pipeline --> Graph[Compiled LangGraph Search Runtime]
+    Graph --> Controller[controller_node]
+    Controller --> Builder[ResponseBuilder]
     Builder --> Response[FinalResponse or dict]
 ```
 
@@ -87,7 +89,12 @@ Handler: `search(body: FinalStructuredQuery, request: Request, _api_key=Depends(
 4. Cache lookup (`prefix="search"`)
 5. On hit: return cached `FinalResponse`
 6. On miss: `pipeline.run_search(body)`
-7. Cache write and return
+7. `run_search` seeds graph state and enters the controller-driven LangGraph runtime
+8. `controller_node` now performs collaborative reasoning before each route decision:
+   - proposal agents suggest actions
+   - critique agents score proposal quality
+   - a synthesis step selects the final action or falls back deterministically
+9. Cache write and return
 
 > `/search` does not accept raw natural language text.
 
@@ -180,17 +187,42 @@ sequenceDiagram
       A-->>C: FinalResponse
     else cache miss
       A->>P: run_search(FinalStructuredQuery)
+      P->>P: seed SearchGraphState
+      P->>P: controller_node decides next action
+      P->>P: action node executes
+      P->>P: control returns to controller_node
       P-->>A: FinalResponse
       A->>R: set(search, cache_key, response)
       A-->>C: FinalResponse
     end
 ```
 
+### Controller-driven search runtime
+The API contract is unchanged, but `/search` is now backed by an agent-driven LangGraph runtime.
+
+Controller responsibilities:
+- choose the next execution step dynamically
+- react to `match_quality`, `tool_request`, `tool_result`, and `retry_count`
+- terminate safely when results are strong, retries are exhausted, or no useful candidates remain
+
+Action nodes used by the runtime:
+- `parse_query_node`
+- `normalization_node`
+- `product_matching_node`
+- `tool_execution_node`
+- `match_quality_node`
+- `enrichment_node`
+- `ranking_node`
+- `deal_detection_node`
+- `response_node`
+
 ---
 
 ## 5) Response structure and field behavior
 
 Search responses are assembled by `ResponseBuilder.build_search_response`.
+
+`POST /search` now executes a compiled LangGraph search runtime behind `AgentPipeline.run_search` while preserving the same route contract and cache behavior.
 
 Each product row includes:
 - identity/context: `platform`, `product_id`, `name`, `brand`, `unit`
@@ -204,6 +236,19 @@ Each product row includes:
 - `link unavailable` otherwise
 
 `best_option` mirrors key fields from top-ranked item.
+
+Search response metadata includes:
+- `matching` -> `matched_via`, `fallback_trace`, `tool_attempts`, `approximate_match`, `quality_score`, `source_breakdown`
+- `search_graph` -> `match_quality`, `retry_count`, `selected_path`, `tool_trace`, `path_history`, `decision_trace`, `collaborative_proposals`, `collaborative_critiques`, `synthesis_trace`
+- `platform_signals` and `coordination_trace` -> orchestration overlays preserved from parse/execution
+
+### Tool usage observability
+When the controller routes through `tool_execution_node`, the final response still preserves:
+- tool attempts from product intelligence integrations
+- fallback/enrichment traces
+- controller decision history
+
+This allows API consumers and operators to inspect why a search flowed through enrichment, approximation, or direct ranking.
 
 ---
 

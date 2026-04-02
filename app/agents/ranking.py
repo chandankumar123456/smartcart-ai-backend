@@ -10,8 +10,9 @@ Input: UnifiedProduct
 Output: RankingResult
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
+from app.agents.base_execution import BaseExecutionAgent
 from app.data.models import Platform, PlatformProduct, RankedProduct, RankingResult, UnifiedProduct
 
 # Scoring weights (must sum to 1.0)
@@ -88,7 +89,7 @@ def _score_product(
     )
 
 
-class RankingAgent:
+class RankingAgent(BaseExecutionAgent):
     """Ranks products by composite score and returns the best option.
 
     README: Core decision-making layer.
@@ -139,3 +140,22 @@ class RankingAgent:
             ranked_list=ranked_list,
             best_option=ranked_list[0] if ranked_list else None,
         )
+
+    async def act(self, state: Mapping[str, Any]) -> Dict[str, Any]:
+        ranking_result = await self.run(
+            state["unified_product"],
+            ranking_preferences=state.get("ranking_preferences"),
+        )
+        return {
+            "current_step": "ranking_node",
+            "ranking_result": ranking_result,
+            "ranked_products": ranking_result,
+            "last_observation": {
+                "ranked_count": len(ranking_result.ranked_list),
+                "best_platform": (
+                    ranking_result.best_option.platform.value
+                    if ranking_result.best_option
+                    else ""
+                ),
+            },
+        }
