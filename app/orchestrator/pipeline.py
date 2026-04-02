@@ -71,6 +71,9 @@ from app.response.builder import ResponseBuilder
 logger = logging.getLogger(__name__)
 # The LangGraph enrichment loop is intentionally capped at two retries:
 # one expansion pass for close variants and one broader fallback pass.
+# This replaces the older broader loop budget of three because controller-led
+# execution now separates tool enrichment from candidate enrichment, so an
+# extra candidate retry no longer improves coverage meaningfully.
 _MAX_ENRICHMENT_RETRY_ATTEMPTS = 2
 _MAX_CANDIDATE_ENTITIES = 3
 _MIN_OPTIMIZATION_SCORE = 0.2

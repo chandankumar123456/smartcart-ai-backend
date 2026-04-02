@@ -19,6 +19,9 @@ def build_search_execution_graph(pipeline: "AgentPipeline"):
 
     controller_agent = ControllerAgent(max_retries=pipeline._max_enrichment_retry_attempts)
 
+    def clone_diagnostics(state: SearchGraphState) -> MatchingDiagnostics:
+        return (state.get("diagnostics") or MatchingDiagnostics()).model_copy(deep=True)
+
     async def controller_node(state: SearchGraphState) -> SearchGraphState:
         return await controller_agent.act(state)
 
@@ -95,7 +98,7 @@ def build_search_execution_graph(pipeline: "AgentPipeline"):
         """Expand candidate entities from variants, ambiguity candidates, and category fallbacks."""
         final_structured = state["final_structured_query"]
         normalized_item = state.get("normalized_item")
-        diagnostics = (state.get("diagnostics") or MatchingDiagnostics()).model_copy(deep=True)
+        diagnostics = clone_diagnostics(state)
         diagnostics.fallback_trace.append("controller_enrichment")
         extra_candidates = []
         if normalized_item:
