@@ -289,11 +289,17 @@ class AgentPipeline:
             final_structured.constraints.ranking_preference_weights = merged
         state.update(
             {
+                "current_step": "run_search_entry",
+                "next_action": "controller_node",
                 "candidate_entities": self._build_candidate_entities(final_structured),
                 "current_path_index": 0,
                 "retry_count": 0,
                 "path_history": [],
+                "decision_trace": [],
                 "tool_trace": [],
+                "tool_request": None,
+                "tool_result": None,
+                "preliminary_products": [],
                 "market_signals": market_signals if isinstance(market_signals, dict) else {},
                 "ranking_preferences": dict(final_structured.constraints.ranking_preference_weights),
                 "budget_limit": (final_structured.constraints.budget or {}).get("amount"),
@@ -301,6 +307,10 @@ class AgentPipeline:
             }
         )
         result_state = await self._search_graph.ainvoke(state)
+        updated_final_structured = result_state.get("final_structured_query")
+        if updated_final_structured is not None:
+            for field_name in updated_final_structured.__class__.model_fields:
+                setattr(final_structured, field_name, getattr(updated_final_structured, field_name))
         response = result_state.get("response") or self._builder.build_search_response(
             {
                 "raw_query": final_structured.clean_query.text,
@@ -440,6 +450,7 @@ class AgentPipeline:
         match_quality: str,
         tool_trace: List[Dict[str, Any]],
         path_history: List[Dict[str, Any]],
+        decision_trace: List[Dict[str, Any]],
     ) -> None:
         if final_structured.user_context.predicted_needs:
             response.metadata["predicted_needs"] = final_structured.user_context.predicted_needs
@@ -451,6 +462,7 @@ class AgentPipeline:
             "selected_path": selected_path,
             "tool_trace": tool_trace,
             "path_history": path_history,
+            "decision_trace": decision_trace,
         }
         budget_limit = (final_structured.constraints.budget or {}).get("amount")
         if budget_limit:

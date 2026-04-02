@@ -6,10 +6,6 @@ from unittest.mock import AsyncMock
 from app.data.models import (
     CartItem,
     MatchingDiagnostics,
-    NormalizedItem,
-    QueryFilters,
-    QueryIntent,
-    StructuredQuery,
     UnifiedProduct,
 )
 from app.orchestrator.pipeline import AgentPipeline
@@ -177,12 +173,15 @@ class TestSearchPipeline:
     async def test_parse_query_search_execution_graph_uses_langgraph_nodes(self, pipeline):
         parsed = await pipeline.parse_query("milk")
         operations = [node.operation for node in parsed.execution_graph.nodes]
-        assert operations[:4] == [
+        assert operations[:6] == [
+            "controller_node",
+            "parse_query_node",
             "normalization_node",
             "product_matching_node",
+            "tool_execution_node",
             "match_quality_node",
-            "enrichment_node",
         ]
+        assert "enrichment_node" in operations
         assert "ranking_node" in operations
         assert "response_node" in operations
 
@@ -235,39 +234,47 @@ class TestSearchPipeline:
         assert graph_meta.get("match_quality") in {"strong", "weak", "empty"}
         assert isinstance(graph_meta.get("retry_count"), int)
         assert isinstance(graph_meta.get("tool_trace"), list)
+        assert isinstance(graph_meta.get("decision_trace"), list)
+        assert graph_meta.get("decision_trace")
 
     @pytest.mark.asyncio
     async def test_search_graph_retry_count_caps_at_two(self, pipeline):
         parsed = await pipeline.parse_query("milk")
-        parsed.structured_query = StructuredQuery(
-            product="milk",
-            filters=QueryFilters(),
-            intent=QueryIntent.product_search,
-            normalized_query="milk",
-            raw_query="milk",
+        empty_unified = UnifiedProduct(
+            entity="milk",
+            normalized_name="milk",
+            platforms=[],
+            diagnostics=MatchingDiagnostics(
+                input_term="milk",
+                fallback_trace=["db_lookup", "no_usable_products"],
+                quality_score=0.0,
+            ),
         )
-        pipeline._normalization_agent.run = AsyncMock(
-            return_value=NormalizedItem(
-                canonical_name="milk",
-                possible_variants=["skim milk", "whole milk"],
-                category="dairy",
-            )
-        )
-        pipeline._product_agent.run = AsyncMock(
-            return_value=UnifiedProduct(
-                entity="milk",
-                normalized_name="milk",
-                platforms=[],
-                diagnostics=MatchingDiagnostics(
-                    input_term="milk",
-                    fallback_trace=["db_lookup"],
-                    quality_score=0.0,
-                ),
-            )
+        pipeline._product_agent.act = AsyncMock(
+            return_value={
+                "current_step": "product_matching_node",
+                "unified_product": empty_unified,
+                "diagnostics": empty_unified.diagnostics,
+                "tool_trace": [],
+                "tool_attempts": [],
+                "path_history": [],
+                "tool_request": None,
+                "tool_result": None,
+                "preliminary_products": [],
+                "last_observation": {"phase": "matching_complete", "result_count": 0},
+            }
         )
         result = await pipeline.run_search(parsed)
         assert result.results == []
         assert parsed.learning_signals.retry_count == 2
+
+    @pytest.mark.asyncio
+    async def test_search_unknown_product_routes_through_tool_node(self, pipeline):
+        result = await self._run_from_query(pipeline, "xyz_unknown_product_123")
+        decision_trace = result.metadata.get("search_graph", {}).get("decision_trace", [])
+        actions = [entry.get("action") for entry in decision_trace]
+        assert "tool_execution_node" in actions
+        assert result.metadata.get("search_graph", {}).get("tool_trace")
 
     @pytest.mark.asyncio
     async def test_parse_query_includes_platform_signals_and_coordination_trace(self, pipeline):

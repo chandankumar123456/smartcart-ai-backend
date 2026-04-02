@@ -29,14 +29,22 @@ flowchart TD
     OF --> FSQ[FinalStructuredQuery]
 
     FSQ --> SG[Compiled LangGraph Search Runtime]
-    SG --> NM1[normalization_node]
-    NM1 --> PM[product_matching_node]
-    PM --> MQ[match_quality_node]
-    MQ -->|strong| RK[ranking_node]
-    MQ -->|weak / empty| EN[enrichment_node]
-    EN --> PM
-    RK --> DD[deal_detection_node]
-    DD --> RB[response_node]
+    SG --> CT[controller_node]
+    CT --> NM1[normalization_node]
+    CT --> PM[product_matching_node]
+    CT --> TN[tool_execution_node]
+    CT --> MQ[match_quality_node]
+    CT --> EN[enrichment_node]
+    CT --> RK[ranking_node]
+    CT --> DD[deal_detection_node]
+    CT --> RB[response_node]
+    NM1 --> CT
+    PM --> CT
+    TN --> CT
+    MQ --> CT
+    EN --> CT
+    RK --> CT
+    DD --> CT
     RB --> EV[EvaluationAgent]
 ```
 
@@ -73,7 +81,7 @@ Additional parse-time operations:
 
 ---
 
-## 3) Execution phase: search graph, evaluation, and retry
+## 3) Execution phase: controller-driven search graph, evaluation, and retry
 
 `run_search(final_structured: FinalStructuredQuery)`:
 1. Applies domain guard and unsupported intent exits.
@@ -83,29 +91,52 @@ Additional parse-time operations:
    - `user_query`
    - `structured_query`
    - `final_structured_query`
+   - `current_step`
+   - `next_action`
+   - `last_observation`
    - `candidate_entities`
    - `ranking_preferences`
    - `market_signals`
    - `retry_count`
+   - `decision_trace`
    - `tool_trace`
+   - `tool_request`
+   - `tool_result`
 5. Invokes the compiled LangGraph runtime:
-   - `normalization_node` -> `NormalizationAgent.run`
-   - `product_matching_node` -> `ProductMatchingAgent.run`
+   - `controller_node` -> controller agent decides the next action from accumulated state
+   - `normalization_node` -> `NormalizationAgent.act`
+   - `product_matching_node` -> `ProductMatchingAgent.act`
+   - `tool_execution_node` -> executes tool requests emitted by `ProductMatchingAgent`
    - `match_quality_node` -> classifies `strong | weak | empty`
    - `enrichment_node` -> expands variants, ambiguity candidates, and category substitutes
-   - `ranking_node` -> `RankingAgent.run` + budget optimization
-   - `deal_detection_node` -> `DealDetectionAgent.run`
-   - `response_node` -> `ResponseBuilder.build_search_response` + evaluation/telemetry
-6. Uses conditional edges instead of imperative retry loops:
-   - `strong -> ranking_node`
-   - `weak / empty -> enrichment_node` while retries remain
-   - exhausted retries route to `ranking_node` if products exist, otherwise `response_node`
+   - `ranking_node` -> `RankingAgent.act` + budget optimization
+   - `deal_detection_node` -> `DealDetectionAgent.act`
+   - `response_node` -> `ResponseBuilder.build_search_response` + `EvaluationAgent.act`
+6. Uses a controller loop instead of fixed conditional edges:
+   - controller reads `match_quality`, `tool_request`, `tool_result`, `retry_count`, and `last_observation`
+   - controller chooses the next node dynamically
+   - every action node returns control to the controller until termination
 7. Caps retries at `_MAX_ENRICHMENT_RETRY_ATTEMPTS` (`2`) and records the value in both graph state and `learning_signals.retry_count`.
 8. Updates candidate path selection metadata, response observability, learning outcomes, and user behavior platform event.
 
 ---
 
-## 4) Agent responsibilities and implemented behavior
+## 4) Base execution agent abstraction
+
+`app/agents/base_execution.py` defines the runtime interface used by controller-driven execution.
+
+Contract:
+- read the current graph state
+- return only updated keys
+- optionally emit `next_action`
+- optionally emit `tool_request`
+- preserve observability through `last_observation`
+
+This allows legacy deterministic agents to participate in an agent-style runtime without changing route contracts.
+
+---
+
+## 5) Agent responsibilities and implemented behavior
 
 ## LanguageProcessingAgent (`language_processing.py`)
 - Normalizes text (`NFKC`), lowercases, tokenizes, removes punctuation/noise.
@@ -123,6 +154,12 @@ Additional parse-time operations:
 - LLM-first canonicalization with deterministic fallback maps.
 - Integrates synonym memory reinforcement (`SynonymMemoryAgent`).
 - Exposes single-item and batch normalization paths.
+- Exposes `act(state)` for controller-driven runtime normalization.
+
+## ControllerAgent (`controller.py`)
+- Reads runtime state and selects the next graph node.
+- Uses `tool_request`, `tool_result`, `match_quality`, retry limits, and deal-plan metadata to decide whether to normalize, match, enrich, rank, detect deals, or respond.
+- Appends `decision_trace` for graph observability.
 
 ## ConstraintExtractionAgent (`constraint_extraction.py`)
 - Extracts budget/servings/preferences from query text.
@@ -156,17 +193,22 @@ Additional parse-time operations:
 - Executes DB-first product matching plus async tool registry fan-out.
 - Normalizes tool outputs into `PlatformProduct`, aggregates them into `UnifiedProduct`, and records `MatchingDiagnostics`.
 - Applies filters (`max_price`, `min_price`, `brand`) and top-k relaxation when strict filters empty the set.
+- Exposes `act(state)` to request tool execution through graph state instead of calling the tool registry inline during controller-driven execution.
+- Exposes `execute_tool_request(...)` so the dedicated tool node can run fetch/approximation steps without moving tool ownership out of the agent.
 
 ## RankingAgent (`ranking.py`)
 - Computes weighted composite score (price/delivery/rating/discount).
 - Supports deterministic price-first ordering when price preference is dominant.
+- Exposes `act(state)` for graph execution.
 
 ## DealDetectionAgent (`deal_detection.py`)
 - Detects standard/trending deals based on discount thresholds.
+- Exposes `act(state)` for graph execution.
 
 ## EvaluationAgent (`evaluation.py`)
 - Scores response quality and emits failure signals/corrections.
 - Remains responsible for observability and learning feedback after graph execution rather than controlling the search loop directly.
+- Exposes `act(state)` so response execution can stay state-driven.
 
 ## OutputFormatterAgent (`output_formatter.py`)
 - Deterministically assembles all stage outputs into `FinalStructuredQuery`.
@@ -183,7 +225,21 @@ Additional parse-time operations:
 
 ---
 
-## 5) Execution-path branching and selection
+## 6) Tool usage architecture
+
+Tool execution remains owned by `ProductMatchingAgent` and `app/agents/tools/product_intelligence.py`.
+
+Runtime pattern:
+1. `ProductMatchingAgent.act` inspects DB results and emits `tool_request` when enrichment is needed.
+2. `tool_execution_node` executes the requested tool batch or approximation request asynchronously.
+3. Controller routes back to `product_matching_node`.
+4. `ProductMatchingAgent.act` consumes `tool_result` and finalizes `UnifiedProduct`.
+
+This preserves the existing tool stack while making tool usage graph-visible.
+
+---
+
+## 7) Execution-path branching and selection
 
 `FinalStructuredQuery.candidate_paths` and runtime candidate entities drive graph-based path reasoning.
 
@@ -198,7 +254,7 @@ This enables controlled ambiguity handling without reparsing the raw query.
 
 ---
 
-## 6) Data contracts owned/used by agent layer
+## 8) Data contracts owned/used by agent layer
 
 Core models are defined in `app/data/models.py`.
 
@@ -214,7 +270,21 @@ Execution-time models:
 
 ---
 
-## 7) Recipe and cart methodology reuse
+## 9) Runtime observability
+
+The controller-driven graph records:
+- `decision_trace`
+- `tool_trace`
+- `fallback_trace`
+- `retry_count`
+- `match_quality`
+- `path_history`
+
+These fields are preserved into final response metadata for debugging and evaluation.
+
+---
+
+## 10) Recipe and cart methodology reuse
 
 Normalization is reused outside parse/search:
 - Recipe ingredient mapping normalizes each ingredient prior to product lookup.
@@ -224,7 +294,7 @@ This keeps entity resolution behavior consistent across workflows.
 
 ---
 
-## 8) Testing and validation
+## 11) Testing and validation
 
 Agent-focused tests:
 ```bash
@@ -235,6 +305,6 @@ These tests cover:
 - parse-query contract completeness
 - ranking/deal behavior
 - ambiguity handling
-- LangGraph retry routing behavior
+- controller-driven LangGraph routing behavior
 - normalization synonym mapping
 - recipe/cart pipeline outputs

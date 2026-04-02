@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any, Dict, Mapping
+
+from app.agents.base_execution import BaseExecutionAgent
 from app.data.models import EvaluationResult, FinalResponse, FinalStructuredQuery
 
 
-class EvaluationAgent:
+class EvaluationAgent(BaseExecutionAgent):
     async def run(self, parsed: FinalStructuredQuery, response: FinalResponse) -> EvaluationResult:
         failures = []
         corrections = []
@@ -69,3 +72,16 @@ class EvaluationAgent:
             correction_suggestions=corrections,
             quality_score=max(0.0, min(1.0, round(quality_score, 4))),
         )
+
+    async def act(self, state: Mapping[str, Any]) -> Dict[str, Any]:
+        final_structured: FinalStructuredQuery = state["final_structured_query"]
+        response: FinalResponse = state["response"]
+        result = await self.run(final_structured, response)
+        return {
+            "current_step": "evaluation_node",
+            "evaluation_result": result,
+            "last_observation": {
+                "evaluation_success": result.success,
+                "quality_score": result.quality_score,
+            },
+        }

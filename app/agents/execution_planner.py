@@ -32,38 +32,81 @@ class ExecutionPlannerAgent:
         secondary = set(intent_result.secondary_intents)
         plan_id = f"plan-{uuid.uuid4().hex[:8]}"
         nodes: list[ExecutionNode] = [
-            ExecutionNode(node_id="normalize", operation="normalization_node"),
+            ExecutionNode(node_id="controller", operation="controller_node"),
+            ExecutionNode(
+                node_id="parse",
+                operation="parse_query_node",
+                depends_on=["controller"],
+                condition="if_raw_query_only",
+            ),
+            ExecutionNode(
+                node_id="normalize",
+                operation="normalization_node",
+                depends_on=["controller"],
+                condition="controller_selects_normalization",
+            ),
             ExecutionNode(
                 node_id="match",
                 operation="product_matching_node",
-                depends_on=["normalize"],
+                depends_on=["controller"],
+                condition="controller_selects_matching",
+            ),
+            ExecutionNode(
+                node_id="tool",
+                operation="tool_execution_node",
+                depends_on=["controller"],
+                condition="controller_selects_tool_execution",
             ),
             ExecutionNode(
                 node_id="quality",
                 operation="match_quality_node",
-                depends_on=["match"],
+                depends_on=["controller"],
+                condition="controller_selects_match_quality",
             ),
             ExecutionNode(
                 node_id="enrich",
                 operation="enrichment_node",
-                depends_on=["quality"],
-                condition="if_match_empty_or_weak",
+                depends_on=["controller"],
+                condition="controller_selects_enrichment",
                 metadata={"max_retries": 2},
             ),
-            ExecutionNode(node_id="rank", operation="ranking_node", depends_on=["quality"]),
-            ExecutionNode(node_id="deals", operation="deal_detection_node", depends_on=["rank"]),
-            ExecutionNode(node_id="response", operation="response_node", depends_on=["deals"]),
+            ExecutionNode(
+                node_id="rank",
+                operation="ranking_node",
+                depends_on=["controller"],
+                condition="controller_selects_ranking",
+            ),
+            ExecutionNode(
+                node_id="deals",
+                operation="deal_detection_node",
+                depends_on=["controller"],
+                condition="controller_selects_deals",
+            ),
+            ExecutionNode(
+                node_id="response",
+                operation="response_node",
+                depends_on=["controller"],
+                condition="controller_selects_response",
+            ),
         ]
         edges = [
-            {"from": "normalize", "to": "match"},
-            {"from": "match", "to": "quality"},
-            {"from": "quality", "to": "rank", "condition": "strong"},
-            {"from": "quality", "to": "enrich", "condition": "weak_or_empty"},
-            {"from": "enrich", "to": "match", "condition": "retry"},
-            {"from": "enrich", "to": "rank", "condition": "retry_exhausted_with_candidates"},
-            {"from": "enrich", "to": "response", "condition": "retry_exhausted_empty"},
-            {"from": "rank", "to": "deals"},
-            {"from": "deals", "to": "response"},
+            {"from": "controller", "to": "parse", "condition": "raw_query"},
+            {"from": "controller", "to": "normalize", "condition": "normalize"},
+            {"from": "controller", "to": "match", "condition": "match"},
+            {"from": "controller", "to": "tool", "condition": "tool"},
+            {"from": "controller", "to": "quality", "condition": "match_quality"},
+            {"from": "controller", "to": "enrich", "condition": "enrich"},
+            {"from": "controller", "to": "rank", "condition": "rank"},
+            {"from": "controller", "to": "deals", "condition": "deals"},
+            {"from": "controller", "to": "response", "condition": "respond"},
+            {"from": "parse", "to": "controller"},
+            {"from": "normalize", "to": "controller"},
+            {"from": "match", "to": "controller"},
+            {"from": "tool", "to": "controller"},
+            {"from": "quality", "to": "controller"},
+            {"from": "enrich", "to": "controller"},
+            {"from": "rank", "to": "controller"},
+            {"from": "deals", "to": "controller"},
         ]
         adaptive_flags = {
             "skip_deals": "cheap" in constraints.preferences,
@@ -73,20 +116,33 @@ class ExecutionPlannerAgent:
         }
         if adaptive_flags["skip_deals"]:
             nodes = [
-                ExecutionNode(node_id="response", operation="response_node", depends_on=["rank"])
+                ExecutionNode(
+                    node_id="response",
+                    operation="response_node",
+                    depends_on=["controller"],
+                    condition="controller_selects_response",
+                )
                 if n.node_id == "response"
                 else n
                 for n in nodes
                 if n.node_id != "deals"
             ]
             edges = [
-                {"from": "normalize", "to": "match"},
-                {"from": "match", "to": "quality"},
-                {"from": "quality", "to": "rank", "condition": "strong"},
-                {"from": "quality", "to": "enrich", "condition": "weak_or_empty"},
-                {"from": "enrich", "to": "match", "condition": "retry"},
-                {"from": "enrich", "to": "rank", "condition": "retry_exhausted_with_candidates"},
-                {"from": "rank", "to": "response"},
+                {"from": "controller", "to": "parse", "condition": "raw_query"},
+                {"from": "controller", "to": "normalize", "condition": "normalize"},
+                {"from": "controller", "to": "match", "condition": "match"},
+                {"from": "controller", "to": "tool", "condition": "tool"},
+                {"from": "controller", "to": "quality", "condition": "match_quality"},
+                {"from": "controller", "to": "enrich", "condition": "enrich"},
+                {"from": "controller", "to": "rank", "condition": "rank"},
+                {"from": "controller", "to": "response", "condition": "respond"},
+                {"from": "parse", "to": "controller"},
+                {"from": "normalize", "to": "controller"},
+                {"from": "match", "to": "controller"},
+                {"from": "tool", "to": "controller"},
+                {"from": "quality", "to": "controller"},
+                {"from": "enrich", "to": "controller"},
+                {"from": "rank", "to": "controller"},
             ]
 
         candidate_paths = []

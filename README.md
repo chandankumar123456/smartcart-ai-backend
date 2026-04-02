@@ -24,14 +24,21 @@ flowchart LR
     Cache -->|hit| Resp[FinalResponse]
     Cache -->|miss| Exec[AgentPipeline.run_search]
     Exec --> Graph[Compiled LangGraph Search Graph]
-    Graph --> Norm[normalization_node]
-    Norm --> Match[product_matching_node]
+    Graph --> Controller[controller_node]
+    Controller --> Norm[normalization_node]
+    Controller --> Match[product_matching_node]
+    Controller --> Tool[tool_execution_node]
+    Controller --> Enrich[enrichment_node]
+    Controller --> Rank[ranking_node]
+    Controller --> Deals[deal_detection_node]
+    Controller --> Build[response_node]
+    Norm --> Controller
     Match --> Quality[match_quality_node]
-    Quality -->|strong| Rank[ranking_node]
-    Quality -->|weak / empty| Enrich[enrichment_node]
-    Enrich --> Match
-    Rank --> Deals[deal_detection_node]
-    Deals --> Build[response_node]
+    Quality --> Controller
+    Tool --> Controller
+    Enrich --> Controller
+    Rank --> Controller
+    Deals --> Controller
     Build --> Resp
 
     Scheduler[ScraperScheduler] --> Queue[JobQueue]
@@ -86,20 +93,28 @@ Additional operations in this phase:
 High-level behavior:
 1. Enforce `domain_guard`, unsupported intent, and recipe delegation gates for compatibility.
 2. Seed `SearchGraphState` from `FinalStructuredQuery`, policy overlays, market signals, and retry limits.
-3. Invoke the compiled LangGraph runtime with explicit nodes:
+3. Enter `controller_node`, which acts as the runtime decision-maker for search execution.
+4. Let the controller dynamically choose among:
+   - `parse_query_node`
    - `normalization_node`
    - `product_matching_node`
+   - `tool_execution_node`
    - `match_quality_node`
    - `enrichment_node`
    - `ranking_node`
    - `deal_detection_node`
    - `response_node`
-4. Route graph transitions with conditional edges:
-   - `strong -> ranking_node`
-   - `weak / empty -> enrichment_node`
-   - `enrichment_node -> product_matching_node`
-5. Cap retries with `retry_count` and `_MAX_ENRICHMENT_RETRY_ATTEMPTS = 2`.
-6. Preserve budget filtering, coordination metadata, learning updates, and event emission after graph completion.
+5. Return control to `controller_node` after every action node until termination.
+6. Cap retries with `retry_count` and `_MAX_ENRICHMENT_RETRY_ATTEMPTS = 2`.
+7. Preserve budget filtering, coordination metadata, learning updates, and event emission after graph completion.
+
+### Agent-driven search state
+The search runtime uses an execution-only state contract (`app/orchestrator/state.py`) that carries:
+- control fields: `current_step`, `next_action`, `last_observation`, `decision_trace`
+- tool fields: `tool_request`, `tool_result`, `tool_trace`
+- search artifacts: `normalized_item`, `unified_product`, `ranked_products`, `deals`, `response`
+- routing data: `candidate_entities`, `current_entity`, `selected_path`, `retry_count`, `match_quality`
+- observability overlays: `diagnostics`, `path_history`, `market_signals`, `ranking_preferences`
 
 ### Recipe phase (`AgentPipeline.run_recipe`)
 - Delegates to `RecipeAgent.run(query, servings)`.
@@ -128,7 +143,8 @@ High-level behavior:
 - Ranking/constraints/deal logic are deterministic and testable.
 
 ## Reliability controls
-- LangGraph-controlled retry loop with bounded enrichment retries and explicit conditional routing.
+- LangGraph-controlled retry loop with a controller-driven reasoning cycle.
+- Dedicated tool execution node keeps tool requests observable and isolated from controller logic.
 - Optional Redis cache with graceful no-op behavior if unavailable.
 - API fallback with bounded retries and exponential backoff for 429/transport failures.
 - Startup continues in degraded mode if DB init fails.
@@ -145,7 +161,9 @@ High-level behavior:
 flowchart TD
     E[Entity + variants] --> DBQ[_search_db_products]
     DBQ -->|rows found| DBR[PlatformProduct source=db]
-    DBQ -->|miss / weak| TOOLS[ProductIntelligenceRegistry.fetch]
+    DBQ -->|miss / weak| CTRL[controller_node]
+    CTRL --> TOOLNODE[tool_execution_node]
+    TOOLNODE --> TOOLS[ProductIntelligenceRegistry.fetch / approximate]
     TOOLS --> API[External API]
     TOOLS --> HTTP[HTTP fetch]
     TOOLS --> SCRAPE[Scraper fallback]
@@ -222,7 +240,7 @@ Search result rows include runtime provenance and URL state:
 
 Search metadata also exposes graph/runtime observability:
 - `matching` -> matching diagnostics (`matched_via`, `fallback_trace`, `tool_attempts`, `approximate_match`, `quality_score`)
-- `search_graph` -> graph routing metadata (`match_quality`, `retry_count`, `selected_path`, `tool_trace`, `path_history`)
+- `search_graph` -> graph routing metadata (`match_quality`, `retry_count`, `selected_path`, `tool_trace`, `path_history`, `decision_trace`)
 
 ---
 
