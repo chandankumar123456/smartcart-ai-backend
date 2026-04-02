@@ -9,6 +9,9 @@ Input: UnifiedProduct
 Output: DealResult
 """
 
+from typing import Any, Dict, Mapping
+
+from app.agents.base_execution import BaseExecutionAgent
 from app.data.models import Deal, DealResult, Platform, PlatformProduct, UnifiedProduct
 
 _DISCOUNT_THRESHOLD = 5.0   # % — minimum discount to flag as a deal
@@ -30,7 +33,7 @@ def _build_deal(product: PlatformProduct, deal_type: str) -> Deal:
     )
 
 
-class DealDetectionAgent:
+class DealDetectionAgent(BaseExecutionAgent):
     """Scans a unified product set for deals above configured thresholds.
 
     README: Adds savings intelligence beyond comparison.
@@ -55,3 +58,15 @@ class DealDetectionAgent:
         trending.sort(key=lambda d: d.discount_percent, reverse=True)
 
         return DealResult(deals=deals, trending_deals=trending)
+
+    async def act(self, state: Mapping[str, Any]) -> Dict[str, Any]:
+        deal_result = await self.run(state["unified_product"])
+        return {
+            "current_step": "deal_detection_node",
+            "deal_result": deal_result,
+            "deals": deal_result,
+            "last_observation": {
+                "deal_count": len(deal_result.deals),
+                "trending_count": len(deal_result.trending_deals),
+            },
+        }

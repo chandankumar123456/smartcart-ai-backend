@@ -1,9 +1,14 @@
 """Integration tests for the full agent pipeline."""
 
 import pytest
+import re
 from unittest.mock import AsyncMock
 
-from app.data.models import CartItem
+from app.data.models import (
+    CartItem,
+    MatchingDiagnostics,
+    UnifiedProduct,
+)
 from app.orchestrator.pipeline import AgentPipeline
 
 
@@ -76,9 +81,10 @@ class TestSearchPipeline:
     async def test_search_unknown_product_graceful(self, pipeline):
         result = await self._run_from_query(pipeline, "xyz_unknown_product_123")
         assert result.query == "xyz_unknown_product_123"
-        assert result.results == []
-        assert result.best_option == {}
+        assert len(result.results) > 0
+        assert result.best_option != {}
         assert result.metadata.get("intent") in {"product_search", "exploratory"}
+        assert result.metadata.get("matching", {}).get("approximate_match") is True
 
     @pytest.mark.asyncio
     async def test_search_deals_detected_for_discounted_product(self, pipeline):
@@ -136,6 +142,14 @@ class TestSearchPipeline:
         assert result.metadata.get("intent") == "exploratory"
 
     @pytest.mark.asyncio
+    async def test_search_response_includes_matching_provenance(self, pipeline):
+        result = await self._run_from_query(pipeline, "milk")
+        matching = result.metadata.get("matching", {})
+        assert "matched_via" in matching
+        assert "quality_score" in matching
+        assert "fallback_trace" in matching
+
+    @pytest.mark.asyncio
     async def test_search_vague_multi_item_query_returns_results(self, pipeline):
         result = await self._run_from_query(pipeline, "need paneer cubes and salad leaves for dinner")
         assert len(result.results) > 0
@@ -155,6 +169,22 @@ class TestSearchPipeline:
         assert parsed.execution_plan.mode == "graph"
         assert parsed.execution_graph.graph_id.startswith("graph-")
         assert any(node.operation == "recipe_generation" for node in parsed.execution_graph.nodes)
+
+    @pytest.mark.asyncio
+    async def test_parse_query_search_execution_graph_uses_langgraph_nodes(self, pipeline):
+        parsed = await pipeline.parse_query("milk")
+        operations = [node.operation for node in parsed.execution_graph.nodes]
+        assert operations[:6] == [
+            "controller_node",
+            "parse_query_node",
+            "normalization_node",
+            "product_matching_node",
+            "tool_execution_node",
+            "match_quality_node",
+        ]
+        assert "enrichment_node" in operations
+        assert "ranking_node" in operations
+        assert "response_node" in operations
 
     @pytest.mark.asyncio
     async def test_parse_query_ambiguity_has_candidates(self, pipeline):
@@ -196,6 +226,117 @@ class TestSearchPipeline:
         parsed2 = await pipeline.parse_query("cheap milk under 20")
         await pipeline.run_search(parsed2)
         assert any(note.startswith("selected_path:") for note in parsed2.learning_signals.evaluation_notes)
+
+    @pytest.mark.asyncio
+    async def test_search_response_includes_graph_metadata(self, pipeline):
+        result = await self._run_from_query(pipeline, "milk")
+        graph_meta = result.metadata.get("search_graph", {})
+        assert graph_meta.get("selected_path", "").startswith("path-")
+        assert graph_meta.get("match_quality") in {"strong", "weak", "empty"}
+        assert isinstance(graph_meta.get("retry_count"), int)
+        assert isinstance(graph_meta.get("tool_trace"), list)
+        assert isinstance(graph_meta.get("decision_trace"), list)
+        assert graph_meta.get("decision_trace")
+        assert isinstance(graph_meta.get("collaborative_proposals"), list)
+        assert isinstance(graph_meta.get("collaborative_critiques"), list)
+        assert isinstance(graph_meta.get("synthesis_trace"), dict)
+
+    @pytest.mark.asyncio
+    async def test_search_graph_retry_count_caps_at_two(self, pipeline):
+        parsed = await pipeline.parse_query("milk")
+        empty_unified = UnifiedProduct(
+            entity="milk",
+            normalized_name="milk",
+            platforms=[],
+            diagnostics=MatchingDiagnostics(
+                input_term="milk",
+                fallback_trace=["db_lookup", "no_usable_products"],
+                quality_score=0.0,
+            ),
+        )
+        pipeline._product_agent.act = AsyncMock(
+            return_value={
+                "current_step": "product_matching_node",
+                "unified_product": empty_unified,
+                "diagnostics": empty_unified.diagnostics,
+                "tool_trace": [],
+                "tool_attempts": [],
+                "path_history": [],
+                "tool_request": None,
+                "tool_result": None,
+                "preliminary_products": [],
+                "last_observation": {"phase": "matching_complete", "result_count": 0},
+            }
+        )
+        result = await pipeline.run_search(parsed)
+        assert result.results == []
+        assert parsed.learning_signals.retry_count == 2
+        decision_actions = [
+            entry.get("action")
+            for entry in result.metadata.get("search_graph", {}).get("decision_trace", [])
+        ]
+        assert decision_actions.count("enrichment_node") == 2
+
+    @pytest.mark.asyncio
+    async def test_search_unknown_product_routes_through_tool_node(self, pipeline):
+        result = await self._run_from_query(pipeline, "xyz_unknown_product_123")
+        decision_trace = result.metadata.get("search_graph", {}).get("decision_trace", [])
+        actions = [entry.get("action") for entry in decision_trace]
+        assert "tool_execution_node" in actions
+        assert result.metadata.get("search_graph", {}).get("tool_trace")
+
+    @pytest.mark.asyncio
+    async def test_search_graph_surfaces_collaborative_controller_traces(self):
+        async def collaborative_call(prompt: str, schema_example: str | None = None, response_model=None):
+            if "collaborative controller proposal" in prompt:
+                fallback_match = re.search(r'"fallback_action":\s*"([^"]+)"', prompt)
+                action = fallback_match.group(1) if fallback_match else "response_node"
+                return {
+                    "role": "routing_strategist",
+                    "action": action,
+                    "rationale": "Use the deterministic-safe route for this state.",
+                    "confidence": 0.8,
+                    "evidence": ["available_actions", "fallback_action"],
+                }
+            if "collaborative controller critique" in prompt:
+                proposal_match = re.search(r'"action":\s*"([^"]+)"', prompt)
+                action = proposal_match.group(1) if proposal_match else "response_node"
+                return {
+                    "critic_role": "feasibility_critic",
+                    "proposal_action": action,
+                    "score": 0.7,
+                    "verdict": "support",
+                    "strengths": ["Action is valid"],
+                    "risks": [],
+                    "recommended_adjustments": [],
+                }
+            if "collaborative controller synthesis" in prompt:
+                fallback_match = re.search(r'"fallback_action":\s*"([^"]+)"', prompt)
+                action = fallback_match.group(1) if fallback_match else "response_node"
+                return {
+                    "action": action,
+                    "rationale": "Consensus selected the safe action.",
+                    "confidence": 0.78,
+                    "consensus": "majority_support",
+                    "score_breakdown": {action: 1.5},
+                }
+            raise Exception("LLM not configured in tests")
+
+        mock_llm = AsyncMock()
+        mock_llm.call.side_effect = collaborative_call
+        pipeline = AgentPipeline(llm_manager=mock_llm)
+
+        parsed = await pipeline.parse_query("milk")
+        result = await pipeline.run_search(parsed)
+
+        graph_meta = result.metadata.get("search_graph", {})
+        assert graph_meta.get("collaborative_proposals")
+        assert graph_meta.get("collaborative_critiques")
+        assert graph_meta.get("synthesis_trace", {}).get("consensus") == "majority_support"
+        assert any(
+            entry.get("decision_source") == "collaborative_llm"
+            for entry in graph_meta.get("decision_trace", [])
+        )
 
     @pytest.mark.asyncio
     async def test_parse_query_includes_platform_signals_and_coordination_trace(self, pipeline):
