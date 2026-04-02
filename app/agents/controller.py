@@ -169,7 +169,7 @@ class ControllerAgent(BaseExecutionAgent):
         available_actions: list[str],
         fallback_action: str,
     ) -> dict[str, Any]:
-        diagnostics = state.get("diagnostics")
+        diagnostics = self._serialize_diagnostics(state.get("diagnostics"))
         current_entity = state.get("current_entity")
         if not current_entity:
             normalized_item = state.get("normalized_item")
@@ -184,13 +184,16 @@ class ControllerAgent(BaseExecutionAgent):
                 current_entity = candidate_entities[current_path_index]
         if not current_entity:
             structured_query = state.get("structured_query")
-            current_entity = getattr(structured_query, "product", "") if structured_query else ""
+            if isinstance(structured_query, dict):
+                current_entity = structured_query.get("product", "")
+            elif structured_query:
+                current_entity = getattr(structured_query, "product", "")
         return {
             "user_query": state.get("user_query", ""),
             "current_entity": current_entity or "",
             "match_quality": state.get("match_quality", ""),
             "retry_count": state.get("retry_count", 0),
-            "diagnostics": diagnostics.model_dump() if hasattr(diagnostics, "model_dump") else diagnostics or {},
+            "diagnostics": diagnostics,
             "tool_trace": state.get("tool_trace", []),
             "available_actions": available_actions,
             "fallback_action": fallback_action,
@@ -200,6 +203,16 @@ class ControllerAgent(BaseExecutionAgent):
             "has_ranking_result": state.get("ranking_result") is not None,
             "has_deal_result": state.get("deal_result") is not None,
         }
+
+    @staticmethod
+    def _serialize_diagnostics(diagnostics: Any) -> dict[str, Any]:
+        if diagnostics is None:
+            return {}
+        if isinstance(diagnostics, dict):
+            return diagnostics
+        if hasattr(diagnostics, "model_dump"):
+            return diagnostics.model_dump()
+        return {"value": str(diagnostics)}
 
     async def _generate_proposals(self, collaborative_state: Mapping[str, Any]) -> list[ControllerProposal]:
         proposals: list[ControllerProposal] = []
