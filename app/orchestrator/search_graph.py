@@ -197,7 +197,10 @@ def build_search_execution_graph(pipeline: "AgentPipeline"):
     def route_match_quality(state: SearchGraphState) -> str:
         if state.get("match_quality") == "strong":
             return "ranking_node"
-        if state.get("retry_count", 0) < state.get("max_retries", 2):
+        if state.get("retry_count", 0) < state.get(
+            "max_retries",
+            pipeline._max_enrichment_retry_attempts,
+        ):
             return "enrichment_node"
         unified_product = state.get("unified_product")
         if unified_product and unified_product.platforms:

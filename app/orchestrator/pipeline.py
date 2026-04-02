@@ -118,6 +118,7 @@ class AgentPipeline:
         self._coordination = get_coordination_network()
         self._matching_quality_threshold = _MATCHING_QUALITY_THRESHOLD
         self._min_high_quality_results = _MIN_HIGH_QUALITY_RESULTS
+        self._max_enrichment_retry_attempts = _MAX_ENRICHMENT_RETRY_ATTEMPTS
         self._search_graph = build_search_execution_graph(self)
 
     # ------------------------------------------------------------------
@@ -248,11 +249,24 @@ class AgentPipeline:
         }
 
         if not final_structured.domain_guard.allowed:
-            return self._builder.build_domain_guard_response({"raw_query": final_structured.clean_query.text, **state})
+            return self._builder.build_domain_guard_response(
+                {
+                    "raw_query": final_structured.clean_query.text,
+                    "user_query": state["user_query"],
+                    "final_structured_query": final_structured,
+                    "structured_query": final_structured.structured_query,
+                }
+            )
 
         sq: StructuredQuery = state["structured_query"]
         if sq.intent == QueryIntent.unsupported:
-            return self._builder.build_unsupported_response({"raw_query": final_structured.clean_query.text, **state})
+            return self._builder.build_unsupported_response(
+                {
+                    "raw_query": final_structured.clean_query.text,
+                    "user_query": state["user_query"],
+                    "structured_query": final_structured.structured_query,
+                }
+            )
         if any(n.operation == "recipe_generation" for n in final_structured.execution_graph.nodes):
             response = await self.run_recipe(final_structured.clean_query.text)
             if any(n.operation == "cart_optimization" for n in final_structured.execution_graph.nodes):
@@ -283,7 +297,7 @@ class AgentPipeline:
                 "market_signals": market_signals if isinstance(market_signals, dict) else {},
                 "ranking_preferences": dict(final_structured.constraints.ranking_preference_weights),
                 "budget_limit": (final_structured.constraints.budget or {}).get("amount"),
-                "max_retries": _MAX_ENRICHMENT_RETRY_ATTEMPTS,
+                "max_retries": self._max_enrichment_retry_attempts,
             }
         )
         result_state = await self._search_graph.ainvoke(state)
