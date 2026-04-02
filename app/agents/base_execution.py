@@ -11,4 +11,10 @@ class BaseExecutionAgent(ABC):
 
     @abstractmethod
     async def act(self, state: Mapping[str, Any]) -> dict[str, Any]:
-        """Read current graph state and return updated keys."""
+        """Run agent-specific logic against graph state and return updated keys.
+
+        Implementations should inspect the current state snapshot, perform their
+        execution logic, and return only the keys that changed. Runtime agents
+        are expected to update observability fields such as `current_step` and
+        `last_observation` when they execute.
+        """

@@ -267,6 +267,11 @@ class TestSearchPipeline:
         result = await pipeline.run_search(parsed)
         assert result.results == []
         assert parsed.learning_signals.retry_count == 2
+        decision_actions = [
+            entry.get("action")
+            for entry in result.metadata.get("search_graph", {}).get("decision_trace", [])
+        ]
+        assert decision_actions.count("enrichment_node") == 2
 
     @pytest.mark.asyncio
     async def test_search_unknown_product_routes_through_tool_node(self, pipeline):

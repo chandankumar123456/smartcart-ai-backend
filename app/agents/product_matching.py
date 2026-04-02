@@ -188,6 +188,7 @@ class ProductMatchingAgent(BaseExecutionAgent):
         expanded_terms: list[str],
         category: str | None,
     ) -> ProductIntelligenceContext:
+        """Construct the context object consumed by product intelligence tools."""
         return ProductIntelligenceContext(
             entity=entity,
             raw_query=structured_query.raw_query,
@@ -402,6 +403,7 @@ class ProductMatchingAgent(BaseExecutionAgent):
         products: list[PlatformProduct],
         diagnostics: MatchingDiagnostics,
     ) -> float:
+        """Score matching quality as source bonus + coverage + exactness - approximation penalty."""
         if not products:
             return 0.0
         exact_hits = ProductMatchingAgent._exact_hit_count(entity, products)

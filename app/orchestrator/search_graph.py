@@ -92,6 +92,7 @@ def build_search_execution_graph(pipeline: "AgentPipeline"):
         }
 
     async def enrichment_node(state: SearchGraphState) -> SearchGraphState:
+        """Expand candidate entities from variants, ambiguity candidates, and category fallbacks."""
         final_structured = state["final_structured_query"]
         normalized_item = state.get("normalized_item")
         diagnostics = (state.get("diagnostics") or MatchingDiagnostics()).model_copy(deep=True)
@@ -227,6 +228,7 @@ def build_search_execution_graph(pipeline: "AgentPipeline"):
         }
 
     def route_from_controller(state: SearchGraphState) -> str:
+        """Return the next node selected by the controller from graph state."""
         return state.get("next_action", "response_node")
 
     graph = StateGraph(SearchGraphState)

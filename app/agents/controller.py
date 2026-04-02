@@ -14,6 +14,7 @@ class ControllerAgent(BaseExecutionAgent):
         self._max_retries = max_retries
 
     async def act(self, state: Mapping[str, Any]) -> dict[str, Any]:
+        """Read runtime state and emit the controller's next action decision."""
         next_action = self._decide_next_action(state)
         decision_trace = list(state.get("decision_trace", []))
         decision_trace.append(

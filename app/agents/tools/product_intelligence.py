@@ -346,6 +346,7 @@ class ProductIntelligenceRegistry:
         context: ProductIntelligenceContext,
         attempts: List[ToolAttempt],
     ) -> List[PlatformProduct]:
+        """Run a batch of tools concurrently, record attempts, and aggregate mapped products."""
         results = await asyncio.gather(*(tool.fetch(context) for tool in tools), return_exceptions=True)
         mapped: List[PlatformProduct] = []
         for tool, result in zip(tools, results):
