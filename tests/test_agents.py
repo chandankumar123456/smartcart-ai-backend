@@ -235,7 +235,9 @@ class TestProductMatchingAgent:
         sq = StructuredQuery(product="xyz_nonexistent", filters=QueryFilters(), intent=QueryIntent.product_search, raw_query="xyz")
         result = await agent.run(sq)
         assert len(result.platforms) > 0
+        assert all(product.source == "approximation" for product in result.platforms)
         assert result.diagnostics.approximate_match is True
+        assert result.diagnostics.quality_score >= 0.0
 
     @pytest.mark.asyncio
     async def test_match_generic_chicken_term(self):

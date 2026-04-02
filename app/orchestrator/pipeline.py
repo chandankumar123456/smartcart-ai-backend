@@ -69,6 +69,8 @@ from app.orchestrator.state import SearchGraphState
 from app.response.builder import ResponseBuilder
 
 logger = logging.getLogger(__name__)
+# The LangGraph enrichment loop is intentionally capped at two retries:
+# one expansion pass for close variants and one broader fallback pass.
 _MAX_REASONING_RETRY_ATTEMPTS = 2
 _MAX_CANDIDATE_ENTITIES = 3
 _MIN_OPTIMIZATION_SCORE = 0.2
