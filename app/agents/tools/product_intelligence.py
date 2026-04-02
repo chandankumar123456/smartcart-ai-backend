@@ -21,6 +21,8 @@ from app.scrapers.blinkit_scraper import _extract_from_html
 
 logger = logging.getLogger(__name__)
 _UNIT_PATTERN = re.compile(r"\b\d+(?:\.\d+)?\s?(?:kg|g|mg|l|ml|pcs|pc|pack|packs)\b", re.IGNORECASE)
+_CATEGORY_MATCH_BONUS = 0.15
+_MIN_KEY_SCORE_THRESHOLD = 0.55
 
 
 @dataclass
@@ -281,12 +283,12 @@ class SearchFallbackTool(ProductIntelligenceTool):
                 max((SequenceMatcher(None, term.lower(), key.lower()).ratio() for term in context.expanded_terms), default=0.0),
             )
             if context.category and data_layer._TERM_TO_CATEGORY.get(key) == context.category:
-                key_score += 0.15
+                key_score += _CATEGORY_MATCH_BONUS
             token_overlap = any(
                 set(data_layer._tokenize(term)).intersection(data_layer._tokenize(key))
                 for term in context.expanded_terms
             )
-            if key_score < 0.55 and not token_overlap:
+            if key_score < _MIN_KEY_SCORE_THRESHOLD and not token_overlap:
                 continue
             for item in products:
                 dedupe_key = (item["platform"], item["product_id"])

@@ -138,11 +138,7 @@ class ProductMatchingAgent:
     def _is_weak_match(entity: str, products: list[PlatformProduct]) -> bool:
         if not products:
             return True
-        exact_hits = [
-            p for p in products
-            if p.normalized_name == entity.lower().strip() or entity.lower().strip() in p.name.lower()
-        ]
-        return len(exact_hits) < 1
+        return ProductMatchingAgent._exact_hit_count(entity, products) == 0
 
     @staticmethod
     def _dedupe_products(products: list[PlatformProduct]) -> list[PlatformProduct]:
@@ -193,15 +189,20 @@ class ProductMatchingAgent:
     ) -> float:
         if not products:
             return 0.0
-        exact_hits = sum(
-            1 for p in products
-            if p.normalized_name == entity.lower().strip() or entity.lower().strip() in p.name.lower()
-        )
+        exact_hits = ProductMatchingAgent._exact_hit_count(entity, products)
         source_bonus = 0.15 if diagnostics.matched_via == "db" else 0.1
         approximate_penalty = 0.25 if diagnostics.approximate_match else 0.0
         coverage_score = min(0.5, len(products) * 0.1)
         exact_score = min(0.4, exact_hits * 0.2)
         return max(0.0, min(1.0, round(source_bonus + coverage_score + exact_score - approximate_penalty, 4)))
+
+    @staticmethod
+    def _exact_hit_count(entity: str, products: list[PlatformProduct]) -> int:
+        normalized_entity = entity.lower().strip()
+        return sum(
+            1 for p in products
+            if p.normalized_name == normalized_entity or normalized_entity in p.name.lower()
+        )
 
     @staticmethod
     def _apply_filters(
